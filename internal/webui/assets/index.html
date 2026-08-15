@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#071129">
+  <title>ZentProxy</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/zentproxy-icon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/zentproxy-icon-16.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div id="login" class="login-wrap hidden">
+  <form id="login-form" class="login-card">
+    <div class="brand brand-large"><img class="brand-mark" src="/zentproxy-mark.png" alt="" aria-hidden="true"><span>ZentProxy</span></div>
+    <p class="muted">Sign in to your proxy control plane.</p>
+    <label>Language<select id="login-language"><option value="de">Deutsch</option><option value="en">English</option></select></label>
+    <label>E-mail<input id="login-user" type="email" autocomplete="username" placeholder="admin@example.com" required></label>
+    <label>Password<input id="login-pass" type="password" autocomplete="current-password" required></label>
+    <button class="btn primary wide" type="submit">Sign in</button>
+    <div id="login-error" class="error-text"></div>
+  </form>
+</div>
+
+<div id="app" class="shell hidden">
+  <aside class="sidebar">
+    <div class="brand"><img class="brand-mark" src="/zentproxy-mark.png" alt="" aria-hidden="true"><span>ZentProxy</span></div>
+    <nav id="nav">
+      <button data-page="dashboard" class="active"><svg class="nav-icon" aria-hidden="true"><use href="/icons.svg#overview"></use></svg><span>Overview</span></button>
+      <div class="nav-group-label">Proxy</div>
+      <button data-page="hosts"><svg class="nav-icon" aria-hidden="true"><use href="/icons.svg#proxy-hosts"></use></svg><span>Proxy Hosts</span></button>
+      <button data-page="certificates"><svg class="nav-icon" aria-hidden="true"><use href="/icons.svg#certificates"></use></svg><span>Certificates</span></button>
+      <button data-page="routing"><svg class="nav-icon" aria-hidden="true"><use href="/icons.svg#routing"></use></svg><span>Routing</span></button>
+      <button data-page="access"><svg class="nav-icon" aria-hidden="true"><use href="/icons.svg#access"></use></svg><span>Access Lists</span></button>
+      <div class="nav-group-label">Observability</div>
+      <button data-page="analytics"><svg class="nav-icon" aria-hidden="true"><use href="/icons.svg#analytics"></use></svg><span>Analytics</span></button>
+      <div class="nav-group-label">Security</div>
+      <button data-page="providers"><svg class="nav-icon" aria-hidden="true"><use href="/icons.svg#trusted-proxies"></use></svg><span>Trusted Proxies</span></button>
+      <button data-page="zentloop"><svg class="nav-icon" aria-hidden="true"><use href="/icons.svg#zentloop"></use></svg><span>ZentLoop</span></button>
+      <div class="nav-group-label">System</div>
+      <button data-page="developers"><svg class="nav-icon" aria-hidden="true"><use href="/icons.svg#developer"></use></svg><span>Developer API</span></button>
+      <button data-page="documentation"><svg class="nav-icon" aria-hidden="true"><use href="/icons.svg#documentation"></use></svg><span>Documentation</span></button>
+      <button data-page="audit"><svg class="nav-icon" aria-hidden="true"><use href="/icons.svg#audit"></use></svg><span>Audit Log</span></button>
+    </nav>
+    <div class="sidebar-bottom">
+      <button data-page="migration" class="sidebar-migration"><svg class="nav-icon" aria-hidden="true"><use href="/icons.svg#migration"></use></svg><span>Migration</span></button>
+      <div class="sidebar-separator"></div>
+      <div id="version" class="tiny muted"></div>
+      <button id="logout" class="link-btn">Sign out</button>
+    </div>
+  </aside>
+  <main>
+    <header class="topbar">
+      <div class="page-heading"><span id="page-icon" class="page-icon" aria-hidden="true"><svg><use href="/icons.svg#overview"></use></svg></span><div><h1 id="page-title">Overview</h1><p id="page-subtitle" class="muted"></p></div></div>
+      <div class="topbar-actions"><label class="language-control"><span>Language</span><select id="language-select"><option value="de">Deutsch</option><option value="en">English</option></select></label><div id="top-actions"></div></div>
+    </header>
+    <section id="content" class="content"></section>
+  </main>
+</div>
+
+<dialog id="host-dialog">
+  <form id="host-form" method="dialog" class="dialog-body" autocomplete="off">
+    <div class="dialog-head"><div><h2 id="host-dialog-title">Add proxy host</h2><p class="muted">Simple by default. The useful switches are right here.</p></div><button class="icon-btn" value="cancel" type="button" data-close-dialog>×</button></div>
+    <input id="host-id" type="hidden">
+    <div class="dialog-tabs" role="tablist">
+      <button type="button" class="dialog-tab active" data-host-tab="general">General</button>
+      <button type="button" class="dialog-tab" data-host-tab="ssl">SSL</button>
+      <button type="button" class="dialog-tab" data-host-tab="access">Access</button>
+      <button type="button" class="dialog-tab" data-host-tab="analytics">Analytics</button>
+      <button type="button" class="dialog-tab" data-host-tab="advanced">Advanced</button>
+    </div>
+    <section class="host-tab-panel active" data-host-panel="general">
+      <div class="form-grid">
+        <label class="span-2">Name<input id="host-name" autocomplete="off" required placeholder="Cloud"></label>
+        <label class="span-2">Domains<div id="host-domains" class="tag-input" role="group" aria-label="Domains"><div id="host-domain-chips" class="tag-chips"></div><input id="host-domain-input" type="text" placeholder="cloud.example.com" autocomplete="off"></div><small>Type a domain or IP and press Enter. Paste multiple values at once if you want.</small></label>
+        <label>Scheme<select id="host-scheme"><option>http</option><option>https</option></select></label>
+        <label>Forward host<input id="host-forward" autocomplete="off" required placeholder="nextcloud"></label>
+        <label>Forward port<input id="host-port" type="number" autocomplete="off" min="1" max="65535" value="80" required></label>
+        <label class="span-2">Trusted Proxy Provider<select id="host-provider"><option value="">Direct / None</option></select></label>
+      </div>
+      <div class="switch-grid">
+        <label class="switch-row"><input id="host-enabled" type="checkbox" checked><span>Enabled</span><small>Serve this host.</small></label>
+        <label class="switch-row"><input id="host-websockets" type="checkbox" checked><span>WebSockets</span><small>Upgrade connections automatically.</small></label>
+        <label class="switch-row"><input id="host-preserve" type="checkbox" checked><span>Preserve Host</span><small>Forward the original hostname.</small></label>
+        <label class="switch-row"><input id="host-cache" type="checkbox"><span>Proxy cache</span><small>Enable the lightweight shared cache.</small></label>
+      </div>
+    </section>
+    <section class="host-tab-panel" data-host-panel="ssl">
+      <div class="form-grid">
+        <label>TLS certificate<select id="host-certificate"><option value="">None</option><option value="__letsencrypt__">Create with Let's Encrypt</option></select></label>
+        <label id="host-acme-email-wrap" class="hidden">Let's Encrypt e-mail<input id="host-acme-email" type="email" autocomplete="off" placeholder="admin@example.com"><small>Defaults to the ZentProxy administrator e-mail and can be overridden here.</small></label>
+      </div>
+      <div class="switch-grid">
+        <label class="switch-row"><input id="host-ssl-forced" type="checkbox"><span>Force HTTPS</span><small>Redirect HTTP to HTTPS when a certificate is selected.</small></label>
+        <label class="switch-row"><input id="host-http2" type="checkbox" checked><span>HTTP/2</span><small>Enable HTTP/2 on TLS.</small></label>
+        <label class="switch-row"><input id="host-hsts" type="checkbox"><span>HSTS</span><small>Send Strict-Transport-Security on HTTPS.</small></label>
+        <label class="switch-row"><input id="host-hsts-subdomains" type="checkbox"><span>HSTS subdomains</span><small>Include subdomains in HSTS.</small></label>
+      </div>
+    </section>
+    <section class="host-tab-panel" data-host-panel="access">
+      <div class="form-grid">
+        <label>Access list<select id="host-access-list"><option value="">Public</option></select></label>
+      </div>
+      <div class="switch-grid">
+        <label class="switch-row"><input id="host-exploits" type="checkbox"><span>Common exploit filter</span><small>Drop a small set of high-signal paths/files.</small></label>
+        <label class="switch-row"><input id="host-trust-proto" type="checkbox"><span>Trust forwarded proto</span><small>Preserve an upstream X-Forwarded-Proto value.</small></label>
+      </div>
+    </section>
+    <section class="host-tab-panel" data-host-panel="analytics">
+      <div class="switch-grid">
+        <label class="switch-row"><input id="host-stats" type="checkbox" checked><span>Analytics</span><small>Store request statistics for this host.</small></label>
+        <label class="switch-row"><input id="host-query" type="checkbox"><span>Store query string</span><small>Off by default because URLs can contain secrets.</small></label>
+      </div>
+    </section>
+    <section class="host-tab-panel" data-host-panel="advanced">
+      <label>Advanced OpenResty configuration<textarea id="host-advanced" autocomplete="off" rows="9" placeholder="# Optional server-level directives"></textarea><small>Imported advanced directives are preserved here. Use only if you know the OpenResty syntax.</small></label>
+    </section>
+    <div id="host-error" class="error-text"></div>
+    <div class="dialog-actions"><button type="button" class="btn" data-close-dialog>Cancel</button><button id="host-delete" type="button" class="btn danger hidden">Delete</button><button type="submit" class="btn primary">Save host</button></div>
+  </form>
+</dialog>
+
+<dialog id="token-dialog"><div class="dialog-body"><div class="dialog-head"><h2>API token created</h2><button class="icon-btn" data-close-token>×</button></div><p class="muted">Copy it now. ZentProxy stores only its hash and cannot show it again.</p><pre id="token-value" class="token-box"></pre><div class="dialog-actions"><button id="copy-token" class="btn primary">Copy token</button></div></div></dialog>
+<div id="toast" class="toast hidden"></div>
+<script src="/i18n.js" defer></script>
+<script src="/docs.js" defer></script>
+<script src="/app.js" defer></script>
+</body>
+</html>

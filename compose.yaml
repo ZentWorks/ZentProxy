@@ -1,0 +1,26 @@
+services:
+  zentproxy:
+    image: ghcr.io/zentworks/zentproxy:latest
+    container_name: zentproxy
+    restart: unless-stopped
+    ports:
+      - "80:80/tcp"
+      - "443:443/tcp"
+      - "443:443/udp"
+      - "${ZENTPROXY_ADMIN_PORT:-8080}:${ZENTPROXY_ADMIN_PORT:-8080}/tcp"
+    environment:
+      TZ: "${TZ:-Europe/Berlin}"
+      ZENTPROXY_ADMIN_EMAIL: "${ZENTPROXY_ADMIN_EMAIL:-}"
+      ZENTPROXY_ADMIN_PASSWORD: "${ZENTPROXY_ADMIN_PASSWORD:-}"
+      ZENTPROXY_ADMIN_PORT: "${ZENTPROXY_ADMIN_PORT:-8080}"
+      ZENTPROXY_DATA_DIR: "/data"
+      ZENTPROXY_RAW_RETENTION_DAYS: "${ZENTPROXY_RAW_RETENTION_DAYS:-7}"
+      ZENTPROXY_ANALYTICS_LOG_MAX_MB: "${ZENTPROXY_ANALYTICS_LOG_MAX_MB:-64}"
+      ZENTPROXY_PROVIDER_REFRESH_HOURS: "${ZENTPROXY_PROVIDER_REFRESH_HOURS:-6}"
+      ZENTPROXY_ADMIN_COOKIE_SECURE: "${ZENTPROXY_ADMIN_COOKIE_SECURE:-false}"
+      ZENTPROXY_TRUSTED_TRANSPORT_HOPS: "${ZENTPROXY_TRUSTED_TRANSPORT_HOPS:-}"
+    volumes:
+      - ./data:/data
+      # Optional migration mounts:
+      # - /path/to/source/data:/migration/data:ro
+      # - /path/to/source/letsencrypt:/migration/letsencrypt:ro

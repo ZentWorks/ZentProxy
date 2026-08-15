@@ -1,0 +1,43 @@
+# Git / CI / local release tooling
+.git
+.gitignore
+.github
+.github-release
+deploy.sh
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets*.json
+
+# Development/test-only material
+**/*_test.go
+ROADMAP.md
+CONTRIBUTING.md
+CHANGELOG.md
+SECURITY.md
+docs
+openapi
+unraid
+assets
+README.md
+compose.yaml
+
+# Local/runtime artifacts
+data
+access.jsonl
+*.db
+*.db-shm
+*.db-wal
+*.log
+node_modules
+coverage
+.tmp
+tmp
+.DS_Store
