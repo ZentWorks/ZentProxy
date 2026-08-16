@@ -436,6 +436,11 @@ __ZP_ANALYTICS_IP_MAP__    }
         default 0;
 __ZP_KNOWN_HOSTS__    }
 
+    map $host $zp_dead_host {
+        hostnames;
+        default 0;
+__ZP_DEAD_HOSTS__    }
+
 `, data, pid, data, data, data, data, data, data)
 
 	known := map[string]bool{}
@@ -483,6 +488,20 @@ __ZP_KNOWN_HOSTS__    }
 	}
 	confHead := strings.Replace(b.String(), "__ZP_ANALYTICS_IP_MAP__", analyticsMap, 1)
 	confHead = strings.Replace(confHead, "__ZP_KNOWN_HOSTS__", knownLines.String(), 1)
+
+	deadDomains := make([]string, 0)
+	for _, host := range deadHosts {
+		if !host.Enabled {
+			continue
+		}
+		deadDomains = append(deadDomains, host.Domains...)
+	}
+	sort.Strings(deadDomains)
+	var deadLines strings.Builder
+	for _, domain := range deadDomains {
+		fmt.Fprintf(&deadLines, "        %s 1;\n", domain)
+	}
+	confHead = strings.Replace(confHead, "__ZP_DEAD_HOSTS__", deadLines.String(), 1)
 
 	// Resolve Cloudflare trust by requested host name before analytics/proxy
 	// headers are evaluated. This keeps the canonical-IP decision independent of
@@ -573,6 +592,7 @@ __ZP_KNOWN_HOSTS__    }
         ssl_certificate_key %s/certs/default/privkey.pem;
         ssl_protocols TLSv1.2 TLSv1.3;
         access_log %s/logs/access.jsonl zentproxy_json;
+        if ($zp_dead_host = 1) { return 404; }
         if ($zp_known_host = 1) { return 421; }
 `, data, data, data)
 	if zentLoop.Enabled {
@@ -726,12 +746,25 @@ func renderHostServer(h model.Host, accessLists map[int64]model.AccessList, prov
 					b.WriteString("        satisfy all;\n")
 				}
 			}
+			hasAllow := false
+			hasDenyAll := false
 			for _, rule := range a.Rules {
 				directive := strings.ToLower(strings.TrimSpace(rule.Directive))
 				address := strings.TrimSpace(rule.Address)
 				if (directive == "allow" || directive == "deny") && validAccessAddress(address) {
 					fmt.Fprintf(&b, "        %s %s;\n", directive, address)
+					if directive == "allow" {
+						hasAllow = true
+					}
+					if directive == "deny" && strings.EqualFold(address, "all") {
+						hasDenyAll = true
+					}
 				}
+			}
+			// An allow list is a whitelist. Without a terminal deny, nginx's
+			// access module allows addresses that did not match any rule.
+			if hasAllow && !hasDenyAll {
+				b.WriteString("        deny all;\n")
 			}
 			if a.AuthEnabled && strings.TrimSpace(a.AuthFile) != "" {
 				fmt.Fprintf(&b, "        auth_basic %q;\n        auth_basic_user_file %s;\n", "Authorization required", nginxFilePath(a.AuthFile, "/data/access-lists/invalid"))
