@@ -1,0 +1,11 @@
+.env
+/data/
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.zip
+.DS_Store
+
+# Local GitHub release credentials
+.github-release/deploy.env

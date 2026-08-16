@@ -3,12 +3,12 @@
   const articles = [
     A('getting-started','Getting Started',
       {title:'Getting Started',summary:'The basic ZentProxy workflow from first login to the first proxy host.',sections:[
-        ['How ZentProxy works',['ZentProxy separates the control plane from the proxy data path. You configure hosts in the WebUI; ZentProxy validates the configuration and applies it to OpenResty.','The default installation stores configuration and statistics in SQLite under /data, so no separate database is required.']],
+        ['How ZentProxy works',['You configure hosts in the WebUI. ZentProxy validates the settings and applies the configuration automatically.','The default installation stores configuration and statistics in SQLite under /data, so no separate database is required.']],
         ['First proxy host',['Create a Proxy Host, enter one or more domains or IP addresses, select http or https for the upstream, and enter the target host and port. Enable a certificate only when HTTPS should be served by ZentProxy.'],['A domain or IP can only belong to one proxy host.','Analytics can be enabled or disabled per host.','Use Trusted Proxy when traffic arrives through Cloudflare or another supported reverse proxy.']],
         ['Recommended first steps',['Create or import your proxy hosts.','Configure certificates for HTTPS hosts.','On each Proxy Host that is reached through Cloudflare, select Cloudflare as the Trusted Proxy Provider in the General tab.','Verify Analytics and then review the Audit Log after configuration changes.']]
       ]},
       {title:'Erste Schritte',summary:'Der grundlegende ZentProxy-Ablauf vom ersten Login bis zum ersten Proxy Host.',sections:[
-        ['So arbeitet ZentProxy',['ZentProxy trennt die Verwaltung vom eigentlichen Proxy-Datenpfad. Du konfigurierst Hosts in der WebUI; ZentProxy validiert die Konfiguration und übergibt sie an OpenResty.','Die Standardinstallation speichert Konfiguration und Statistiken in SQLite unter /data. Eine separate Datenbank ist nicht notwendig.']],
+        ['So arbeitet ZentProxy',['Du konfigurierst Hosts bequem in der WebUI. ZentProxy prüft die Einstellungen und übernimmt die Konfiguration automatisch.','Die Standardinstallation speichert Konfiguration und Statistiken in SQLite unter /data. Eine separate Datenbank ist nicht notwendig.']],
         ['Ersten Proxy Host anlegen',['Lege einen Proxy Host an, trage eine oder mehrere Domains oder IP-Adressen ein, wähle http oder https für das Ziel und gib Zielhost sowie Port an. Ein Zertifikat brauchst du nur, wenn ZentProxy selbst HTTPS bereitstellen soll.'],['Eine Domain oder IP kann nur einem Proxy Host zugeordnet sein.','Statistiken lassen sich pro Host ein- oder ausschalten.','Nutze Trusted Proxy, wenn der Traffic über Cloudflare oder einen anderen vorgeschalteten Proxy kommt.']],
         ['Empfohlene erste Schritte',['Proxy Hosts anlegen oder importieren.','Zertifikate für HTTPS-Hosts konfigurieren.','Bei jedem Proxy Host, der über Cloudflare erreicht wird, im General-Tab Cloudflare als Trusted Proxy Provider auswählen.','Statistiken prüfen und nach Änderungen das Audit-Protokoll kontrollieren.']]
       ]}),
@@ -43,13 +43,13 @@
         ['HTTP-01',['HTTP-01 is the simplest challenge. The public domain must resolve to ZentProxy and port 80 must be reachable from the Internet while the certificate is issued or renewed.']],
         ['DNS-01',['DNS-01 proves domain ownership through DNS records. It is required for wildcard certificates and works without exposing port 80, but ZentProxy needs valid API credentials for the DNS provider.']],
         ['Automatic renewal',['Managed Let’s Encrypt certificates are renewed automatically before expiry. A failed renewal is stored as certificate status information so it can be diagnosed in the WebUI.']],
-        ['Migration fallback',['If an existing Let’s Encrypt certificate cannot be copied during migration but its ACME configuration is usable, ZentProxy can reissue the certificate instead of blocking the migration.']]
+        ['Migration fallback',['If an existing Let’s Encrypt certificate cannot be copied during migration but its ACME configuration is usable, ZentProxy can reissue the certificate automatically.']]
       ]},
       {title:'Let’s Encrypt',summary:'HTTP-01, DNS-01, Wildcard-Zertifikate und automatische Erneuerung.',sections:[
         ['HTTP-01',['HTTP-01 ist die einfachste Challenge. Die öffentliche Domain muss auf ZentProxy zeigen und Port 80 muss während Ausstellung oder Erneuerung aus dem Internet erreichbar sein.']],
         ['DNS-01',['DNS-01 weist den Domainbesitz über DNS-Einträge nach. Sie ist für Wildcard-Zertifikate notwendig und funktioniert ohne offenen Port 80, benötigt aber gültige API-Zugangsdaten des DNS-Providers.']],
         ['Automatische Erneuerung',['Von ZentProxy verwaltete Let’s-Encrypt-Zertifikate werden automatisch vor Ablauf erneuert. Fehler bei der Erneuerung werden am Zertifikat gespeichert und können in der WebUI nachvollzogen werden.']],
-        ['Fallback bei Migration',['Kann ein vorhandenes Let’s-Encrypt-Zertifikat bei der Migration nicht kopiert werden, aber die ACME-Konfiguration ist verwendbar, kann ZentProxy es neu ausstellen statt die gesamte Migration zu blockieren.']]
+        ['Fallback bei Migration',['Kann ein vorhandenes Let’s-Encrypt-Zertifikat bei der Migration nicht kopiert werden, die ACME-Konfiguration ist aber verwendbar, kann ZentProxy das Zertifikat automatisch neu ausstellen.']]
       ]}),
     A('analytics','Analytics',
       {title:'Analytics',summary:'Per-host statistics, request details, retention and privacy-related options.',sections:[
@@ -89,19 +89,19 @@
       {title:'Zugriffslisten & Streams',summary:'Allow/Deny-Regeln, Basic Auth, Weiterleitungen, 404-Hosts und TCP/UDP-Streams.',sections:[
         ['Zugriffslisten',['Zugriffslisten kombinieren getrennte Allow- und Deny-Listen für IPs/CIDR-Netze mit optionalem Benutzername/Passwort-Schutz. Du kannst nur IP-Regeln, nur Zugangsdaten, beides verpflichtend oder wahlweise eines von beiden verwenden. Zugangsdaten werden direkt in ZentProxy verwaltet und als bcrypt-htpasswd-Hashes gespeichert.']],
         ['Redirect- und 404-Hosts',['Redirect Hosts leiten eingehende Anfragen auf eine andere URL weiter. 404-Hosts beenden passende Hostnamen bewusst, ohne sie an eine Anwendung weiterzuleiten.']],
-        ['Routing management',['Redirect hosts, explicit 404 hosts and TCP/UDP streams are managed on the Routing page. Click an existing row to edit it or use the add action in each section.']],
+        ['Routing-Verwaltung',['Weiterleitungen, explizite 404-Hosts und TCP/UDP-Streams werden auf der Seite Routing verwaltet. Bestehende Einträge kannst du anklicken und bearbeiten oder über die jeweilige Hinzufügen-Aktion neue Einträge erstellen.']],
         ['Streams',['Streams leiten rohen TCP- und/oder UDP-Traffic weiter. Der eingehende Port muss zusätzlich in Docker oder Unraid veröffentlicht werden; ZentProxy kann einem bereits laufenden Container nicht selbst nachträglich ein Host-Port-Mapping hinzufügen.']]
       ]}),
     A('migration','Migration',
       {title:'Migration',summary:'Analyze a running source installation and transfer supported configuration safely.',sections:[
         ['Analyze first',['Migration analysis is read-only. ZentProxy inspects hosts, certificates, access lists, redirects, 404 hosts and streams before writing anything locally.']],
-        ['Full migration',['A full migration imports compatible routing, access and TLS settings. Where source certificate files are mounted read-only, ZentProxy can copy them. Managed Let’s Encrypt certificates may instead be reissued when safe. If a Let’s Encrypt reissue fails during the import, ZentProxy continues with the remaining migration and leaves dependent routing objects without TLS until the certificate is successfully issued and attached.']],
+        ['Full migration',['A full migration imports compatible routing, access and TLS settings. Managed Let’s Encrypt certificates may be reissued when safe. If a Let’s Encrypt reissue fails during the import, ZentProxy continues with the remaining migration and leaves dependent routing objects without TLS until the certificate is successfully issued and attached.']],
         ['Blocking conditions',['ZentProxy blocks the full migration when continuing would create a broken setup, for example when a DNS-01 certificate needs credentials that cannot be preserved safely.']],
         ['Source remains unchanged',['The migration source is never modified. Keep the old proxy available until imported hosts and certificates have been tested on ZentProxy.']]
       ]},
       {title:'Migration',summary:'Eine laufende Quellinstallation analysieren und unterstützte Konfiguration sicher übernehmen.',sections:[
         ['Erst analysieren',['Die Migrationsanalyse arbeitet read-only. ZentProxy prüft Hosts, Zertifikate, Zugriffslisten, Weiterleitungen, 404-Hosts und Streams, bevor lokal etwas geschrieben wird.']],
-        ['Vollständige Migration',['Eine vollständige Migration übernimmt kompatible Routing-, Zugriffs- und TLS-Einstellungen. Wenn Zertifikatsdateien der Quelle read-only gemountet sind, kann ZentProxy sie kopieren. Verwaltete Let’s-Encrypt-Zertifikate können alternativ sicher neu ausgestellt werden.']],
+        ['Vollständige Migration',['Eine vollständige Migration übernimmt kompatible Routing-, Zugriffs- und TLS-Einstellungen. Verwaltete Let’s-Encrypt-Zertifikate können bei Bedarf sicher neu ausgestellt werden.']],
         ['Wann blockiert wird',['ZentProxy blockiert die vollständige Migration, wenn ein Weiterlaufen zu einem kaputten Setup führen würde, zum Beispiel bei DNS-01-Zertifikaten, deren Provider-Zugangsdaten nicht sicher übernommen werden können.']],
         ['Quelle bleibt unverändert',['Die Quellinstallation wird nicht verändert. Lass den alten Proxy verfügbar, bis importierte Hosts und Zertifikate in ZentProxy getestet wurden.']]
       ]}),
@@ -119,15 +119,13 @@
         ['Health und Fallback',['ZentProxy prüft ZentLoop alle 15 Sekunden und zeigt Erreichbarkeit, Signaturstatus, Latenz und Fehler. Ist die Integration nicht verfügbar oder kann eine konfigurierte Signatur nicht verifiziert werden, greift der gewählte 403- oder 503-Fallback statt den Request hängen zu lassen.']]
       ]}),
     A('developer-api','Developer API & Integrations',
-      {title:'Developer API & Integrations',summary:'Versioned REST API, scoped API keys and interactive OpenAPI documentation.',sections:[
+      {title:'Developer API & Integrations',summary:'Versioned REST API and scoped API keys for integrations.',sections:[
         ['API first',['The ZentProxy WebUI uses the same versioned backend API that is available to integrations. The stable base path is /api/v1.']],
-        ['API keys',['Create separate API keys for integrations and grant only the scopes they need. API keys are revocable and cannot create additional API keys.']],
-        ['OpenAPI',['Interactive API documentation is available under /api/docs. The machine-readable specification remains available under /api/v1/openapi.yaml for SDK generators and other tooling.']]
+        ['API keys',['Create separate API keys for integrations and grant only the scopes they need. API keys are revocable and cannot create additional API keys.']]
       ]},
-      {title:'Entwickler-API & Integrationen',summary:'Versionierte REST-API, API-Schlüssel mit Scopes und interaktive OpenAPI-Dokumentation.',sections:[
+      {title:'Entwickler-API & Integrationen',summary:'Versionierte REST-API und API-Schlüssel mit Scopes für Integrationen.',sections:[
         ['API first',['Die ZentProxy-WebUI verwendet dieselbe versionierte Backend-API, die auch Integrationen zur Verfügung steht. Der stabile Basispfad ist /api/v1.']],
-        ['API-Schlüssel',['Erstelle für Integrationen getrennte API-Schlüssel und gib ihnen nur die benötigten Scopes. API-Schlüssel sind widerrufbar und können selbst keine weiteren API-Schlüssel erstellen.']],
-        ['OpenAPI',['Die interaktive API-Dokumentation erreichst du unter /api/docs. Die maschinenlesbare Spezifikation bleibt unter /api/v1/openapi.yaml für SDK-Generatoren und andere Tools verfügbar.']]
+        ['API-Schlüssel',['Erstelle für Integrationen getrennte API-Schlüssel und gib ihnen nur die benötigten Scopes. API-Schlüssel sind widerrufbar und können selbst keine weiteren API-Schlüssel erstellen.']]
       ]}),
     A('troubleshooting','Troubleshooting',
       {title:'Troubleshooting',summary:'Common checks when a host, certificate or migration does not behave as expected.',sections:[

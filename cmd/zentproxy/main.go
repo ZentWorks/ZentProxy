@@ -11,14 +11,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zentproxy/zentproxy/internal/analytics"
-	"github.com/zentproxy/zentproxy/internal/api"
-	"github.com/zentproxy/zentproxy/internal/certificates"
-	"github.com/zentproxy/zentproxy/internal/config"
-	"github.com/zentproxy/zentproxy/internal/db"
-	"github.com/zentproxy/zentproxy/internal/providers"
-	"github.com/zentproxy/zentproxy/internal/proxy"
-	"github.com/zentproxy/zentproxy/internal/zentloop"
+	"github.com/ZentWorks/ZentProxy/internal/analytics"
+	"github.com/ZentWorks/ZentProxy/internal/api"
+	"github.com/ZentWorks/ZentProxy/internal/certificates"
+	"github.com/ZentWorks/ZentProxy/internal/config"
+	"github.com/ZentWorks/ZentProxy/internal/db"
+	"github.com/ZentWorks/ZentProxy/internal/providers"
+	"github.com/ZentWorks/ZentProxy/internal/proxy"
+	"github.com/ZentWorks/ZentProxy/internal/zentloop"
 )
 
 var version = "dev"
@@ -70,7 +70,7 @@ func main() {
 		log.Printf("Bootstrap credentials were also written to %s and will be deleted after the first successful login.", bootstrapPath)
 	}
 
-	proxyManager := proxy.NewManager(store, cfg.DataDir)
+	proxyManager := proxy.NewManager(store, cfg.DataDir, cfg.AnalyticsIPMode)
 	if err := proxyManager.Apply(); err != nil {
 		log.Fatalf("initial proxy configuration: %v", err)
 	}

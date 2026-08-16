@@ -17,19 +17,27 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/zentproxy/zentproxy/internal/db"
-	"github.com/zentproxy/zentproxy/internal/model"
+	"github.com/ZentWorks/ZentProxy/internal/db"
+	"github.com/ZentWorks/ZentProxy/internal/model"
 )
 
 type Manager struct {
 	store                *db.Store
 	dataDir              string
 	trustedTransportHops []string
+	analyticsIPMode      string
 	mu                   sync.Mutex
 }
 
-func NewManager(store *db.Store, dataDir string) *Manager {
-	return &Manager{store: store, dataDir: dataDir, trustedTransportHops: detectTrustedTransportHops()}
+func NewManager(store *db.Store, dataDir string, analyticsIPMode ...string) *Manager {
+	mode := "full"
+	if len(analyticsIPMode) > 0 {
+		switch strings.ToLower(strings.TrimSpace(analyticsIPMode[0])) {
+		case "full", "anonymized", "disabled":
+			mode = strings.ToLower(strings.TrimSpace(analyticsIPMode[0]))
+		}
+	}
+	return &Manager{store: store, dataDir: dataDir, trustedTransportHops: detectTrustedTransportHops(), analyticsIPMode: mode}
 }
 
 func detectTrustedTransportHops() []string {
@@ -405,8 +413,11 @@ __ZP_CLOUDFLARE_HOSTS__    }
         ~^1:.+ $http_cf_connecting_ip;
     }
 
-    log_format zentproxy_json escape=json '{"ts":"$time_iso8601","host":"$host","ip":"$zp_client_ip","method":"$request_method","path":"$uri","query":"","status":$status,"bytes":$body_bytes_sent,"request_time":"$request_time","upstream_time":"$upstream_response_time","user_agent":"$http_user_agent","referer":"$http_referer","http_version":"$server_protocol","tls_version":"$ssl_protocol"}';
-    log_format zentproxy_json_query escape=json '{"ts":"$time_iso8601","host":"$host","ip":"$zp_client_ip","method":"$request_method","path":"$uri","query":"$args","status":$status,"bytes":$body_bytes_sent,"request_time":"$request_time","upstream_time":"$upstream_response_time","user_agent":"$http_user_agent","referer":"$http_referer","http_version":"$server_protocol","tls_version":"$ssl_protocol"}';
+    map $zp_client_ip $zp_analytics_ip {
+__ZP_ANALYTICS_IP_MAP__    }
+
+    log_format zentproxy_json escape=json '{"ts":"$time_iso8601","host":"$host","ip":"$zp_analytics_ip","method":"$request_method","path":"$uri","query":"","status":$status,"bytes":$body_bytes_sent,"request_time":"$request_time","upstream_time":"$upstream_response_time","user_agent":"$http_user_agent","referer":"$http_referer","http_version":"$server_protocol","tls_version":"$ssl_protocol"}';
+    log_format zentproxy_json_query escape=json '{"ts":"$time_iso8601","host":"$host","ip":"$zp_analytics_ip","method":"$request_method","path":"$uri","query":"$args","status":$status,"bytes":$body_bytes_sent,"request_time":"$request_time","upstream_time":"$upstream_response_time","user_agent":"$http_user_agent","referer":"$http_referer","http_version":"$server_protocol","tls_version":"$ssl_protocol"}';
 
     access_log off;
 
@@ -461,7 +472,17 @@ __ZP_KNOWN_HOSTS__    }
 	for _, domain := range knownDomains {
 		fmt.Fprintf(&knownLines, "        %s 1;\n", domain)
 	}
-	confHead := strings.Replace(b.String(), "__ZP_KNOWN_HOSTS__", knownLines.String(), 1)
+	analyticsMap := "        default $zp_client_ip;\n"
+	switch m.analyticsIPMode {
+	case "disabled":
+		analyticsMap = "        default \"\";\n"
+	case "anonymized":
+		analyticsMap = "        default anonymized;\n" +
+			"        ~^([0-9][0-9]?[0-9]?)\\.([0-9][0-9]?[0-9]?)\\.([0-9][0-9]?[0-9]?)\\.[0-9][0-9]?[0-9]?$ $1.$2.$3.0;\n" +
+			"        ~^([0-9A-Fa-f][0-9A-Fa-f]?[0-9A-Fa-f]?[0-9A-Fa-f]?):([0-9A-Fa-f][0-9A-Fa-f]?[0-9A-Fa-f]?[0-9A-Fa-f]?): $1:$2::;\n"
+	}
+	confHead := strings.Replace(b.String(), "__ZP_ANALYTICS_IP_MAP__", analyticsMap, 1)
+	confHead = strings.Replace(confHead, "__ZP_KNOWN_HOSTS__", knownLines.String(), 1)
 
 	// Resolve Cloudflare trust by requested host name before analytics/proxy
 	// headers are evaluated. This keeps the canonical-IP decision independent of

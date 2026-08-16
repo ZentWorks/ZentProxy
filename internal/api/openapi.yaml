@@ -5,6 +5,27 @@ info:
   description: Versioned API for ZentProxy proxy management, certificates, routing, analytics, trusted proxies, integrations, user preferences and migration tooling.
 servers:
   - url: /api/v1
+tags:
+  - name: System
+    description: System information and administrator preferences.
+  - name: Proxy Hosts
+    description: HTTP and HTTPS reverse proxy hosts.
+  - name: Certificates
+    description: Certificate import, issuance and renewal.
+  - name: Access Lists
+    description: Reusable IP and Basic Authentication policies.
+  - name: Routing
+    description: Redirect hosts, 404 hosts and TCP/UDP streams.
+  - name: Analytics
+    description: Per-host traffic summaries and recent requests.
+  - name: Trusted Proxies
+    description: Trusted proxy and CDN networks used to recover the original client IP.
+  - name: ZentLoop
+    description: ZentLoop integration status, lists and routing rules.
+  - name: Audit
+    description: Administrative change history.
+  - name: Migration
+    description: Analyze and import supported Nginx Proxy Manager configuration.
 components:
   securitySchemes:
     bearerAuth:
@@ -61,6 +82,17 @@ components:
         custom_locations:
           type: array
           items: { $ref: '#/components/schemas/CustomLocation' }
+    TrustedProxyProviderInput:
+      type: object
+      required: [name, header, cidrs]
+      properties:
+        name: { type: string, example: Office reverse proxy }
+        header: { type: string, example: X-Forwarded-For, description: Header containing the original client IP }
+        cidrs:
+          type: array
+          minItems: 1
+          items: { type: string, description: IPv4/IPv6 address or CIDR }
+          example: [10.0.0.10, 192.168.1.0/24]
     ZentLoopIPList:
       type: object
       required: [name, entries]
@@ -210,6 +242,7 @@ security:
 paths:
   /user/preferences/language:
     put:
+      tags: [System]
       summary: Set the current administrator UI language
       description: Interactive administrator session only. Supported languages are de and en.
       security:
@@ -228,6 +261,7 @@ paths:
         '422': { description: Unsupported language }
   /user/preferences/proxy-hosts-view:
     put:
+      tags: [System]
       summary: Set the current administrator Proxy Hosts view
       description: Interactive administrator session only.
       security:
@@ -246,17 +280,21 @@ paths:
         '422': { description: Unsupported view }
   /system/info:
     get:
+      tags: [System]
       summary: Get system information
       responses: { '200': { description: OK } }
   /system/capabilities:
     get:
+      tags: [System]
       summary: Discover API capabilities and available scopes
       responses: { '200': { description: OK } }
   /hosts:
     get:
+      tags: [Proxy Hosts]
       summary: List proxy hosts
       responses: { '200': { description: OK } }
     post:
+      tags: [Proxy Hosts]
       summary: Create a proxy host
       requestBody:
         required: true
@@ -271,23 +309,28 @@ paths:
         required: true
         schema: { type: integer }
     get:
+      tags: [Proxy Hosts]
       summary: Get a proxy host
       responses: { '200': { description: OK }, '404': { description: Not found } }
     put:
+      tags: [Proxy Hosts]
       summary: Replace a proxy host
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/HostInput' } } }
       responses: { '200': { description: Updated } }
     delete:
+      tags: [Proxy Hosts]
       summary: Delete a proxy host
       responses: { '200': { description: Deleted } }
   /certificates:
     get:
+      tags: [Certificates]
       summary: List certificates and renewal state
       responses: { '200': { description: OK } }
   /certificates/letsencrypt:
     post:
+      tags: [Certificates]
       summary: Issue a Let's Encrypt certificate using HTTP-01 or DNS-01
       requestBody:
         required: true
@@ -295,6 +338,7 @@ paths:
       responses: { '201': { description: Certificate issued }, '502': { description: ACME operation failed } }
   /certificates/import:
     post:
+      tags: [Certificates]
       summary: Import an existing certificate and private key
       requestBody:
         required: true
@@ -302,11 +346,13 @@ paths:
       responses: { '201': { description: Certificate imported }, '422': { description: Invalid certificate material } }
   /certificates/{id}/renew:
     post:
+      tags: [Certificates]
       summary: Renew a managed Let's Encrypt certificate immediately
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       responses: { '200': { description: Renewed }, '502': { description: ACME operation failed } }
   /certificates/{id}:
     put:
+      tags: [Certificates]
       summary: Update certificate display name and description
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       requestBody:
@@ -314,14 +360,17 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/CertificateMetadataInput' } } }
       responses: { '200': { description: Updated }, '404': { description: Not found } }
     delete:
+      tags: [Certificates]
       summary: Delete an unassigned certificate
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       responses: { '200': { description: Deleted }, '409': { description: Certificate is still assigned } }
   /access-lists:
     get:
+      tags: [Access Lists]
       summary: List access lists
       responses: { '200': { description: OK } }
     post:
+      tags: [Access Lists]
       summary: Create an IP-based access list
       requestBody:
         required: true
@@ -329,10 +378,12 @@ paths:
       responses: { '201': { description: Created } }
   /access-lists/{id}:
     get:
+      tags: [Access Lists]
       summary: Get an access list
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       responses: { '200': { description: OK }, '404': { description: Not found } }
     put:
+      tags: [Access Lists]
       summary: Update a access list
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       requestBody:
@@ -340,16 +391,19 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/AccessListInput' } } }
       responses: { '200': { description: Updated }, '404': { description: Not found } }
     delete:
+      tags: [Access Lists]
       summary: Delete a access list
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       responses: { '200': { description: Deleted }, '409': { description: Still in use } }
   /access-lists/{id}/users:
     get:
+      tags: [Access Lists]
       summary: List usernames configured for an access list
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       responses: { '200': { description: Username list }, '404': { description: Access list not found } }
   /access-lists/{id}/users/{username}:
     put:
+      tags: [Access Lists]
       summary: Create a credential or replace its password
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -365,6 +419,7 @@ paths:
                 password: { type: string, minLength: 8, writeOnly: true }
       responses: { '200': { description: Credential created or updated }, '404': { description: Access list not found } }
     delete:
+      tags: [Access Lists]
       summary: Remove a credential from an access list
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -372,9 +427,11 @@ paths:
       responses: { '204': { description: Credential removed }, '404': { description: User or access list not found } }
   /redirect-hosts:
     get:
+      tags: [Routing]
       summary: List redirect hosts
       responses: { '200': { description: OK } }
     post:
+      tags: [Routing]
       summary: Create a redirect host
       requestBody:
         required: true
@@ -382,6 +439,7 @@ paths:
       responses: { '201': { description: Created } }
   /redirect-hosts/{id}:
     put:
+      tags: [Routing]
       summary: Update a redirect host
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       requestBody:
@@ -389,14 +447,17 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/RedirectHostInput' } } }
       responses: { '200': { description: Updated }, '404': { description: Not found } }
     delete:
+      tags: [Routing]
       summary: Delete a redirect host
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       responses: { '200': { description: Deleted }, '409': { description: Still in use } }
   /dead-hosts:
     get:
+      tags: [Routing]
       summary: List 404 hosts
       responses: { '200': { description: OK } }
     post:
+      tags: [Routing]
       summary: Create a 404 host
       requestBody:
         required: true
@@ -404,6 +465,7 @@ paths:
       responses: { '201': { description: Created } }
   /dead-hosts/{id}:
     put:
+      tags: [Routing]
       summary: Update a 404 host
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       requestBody:
@@ -411,14 +473,17 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/DeadHostInput' } } }
       responses: { '200': { description: Updated }, '404': { description: Not found } }
     delete:
+      tags: [Routing]
       summary: Delete a 404 host
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       responses: { '200': { description: Deleted }, '409': { description: Still in use } }
   /streams:
     get:
+      tags: [Routing]
       summary: List TCP/UDP streams
       responses: { '200': { description: OK } }
     post:
+      tags: [Routing]
       summary: Create a TCP/UDP stream
       requestBody:
         required: true
@@ -426,6 +491,7 @@ paths:
       responses: { '201': { description: Created } }
   /streams/{id}:
     put:
+      tags: [Routing]
       summary: Update a stream
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       requestBody:
@@ -433,11 +499,13 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/StreamInput' } } }
       responses: { '200': { description: Updated }, '404': { description: Not found } }
     delete:
+      tags: [Routing]
       summary: Delete a stream
       parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
       responses: { '200': { description: Deleted }, '409': { description: Still in use } }
   /stats/summary:
     get:
+      tags: [Analytics]
       summary: Get aggregated request statistics
       parameters:
         - in: query
@@ -449,22 +517,60 @@ paths:
       responses: { '200': { description: OK } }
   /stats/requests:
     get:
+      tags: [Analytics]
       summary: Get recent requests
       responses: { '200': { description: OK } }
   /trusted-proxy-providers:
     get:
-      summary: List trusted proxy providers and current CIDR ranges
+      tags: [Trusted Proxies]
+      summary: List trusted proxy providers
       responses: { '200': { description: OK } }
+    post:
+      tags: [Trusted Proxies]
+      summary: Create a custom trusted proxy provider
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/TrustedProxyProviderInput' } } }
+      responses:
+        '201': { description: Created }
+        '422': { description: Validation error }
+  /trusted-proxy-providers/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer }
+    put:
+      tags: [Trusted Proxies]
+      summary: Update a custom trusted proxy provider
+      description: Built-in providers such as Cloudflare cannot be edited.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/TrustedProxyProviderInput' } } }
+      responses:
+        '200': { description: Updated }
+        '409': { description: Built-in provider is immutable }
+        '422': { description: Validation error }
+    delete:
+      tags: [Trusted Proxies]
+      summary: Delete a custom trusted proxy provider
+      description: Proxy Hosts using the deleted provider are automatically reset to Direct / None. Built-in providers cannot be deleted.
+      responses:
+        '200': { description: Deleted; response includes hosts_reset count }
+        '409': { description: Built-in provider is immutable }
   /trusted-proxy-providers/{id}/refresh:
     post:
-      summary: Refresh an auto-updated provider immediately
-      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
-      responses: { '200': { description: Refreshed } }
+      tags: [Trusted Proxies]
+      summary: Refresh an auto-updated trusted proxy provider
+      description: Intended for built-in remote providers such as Cloudflare.
+      responses: { '200': { description: Updated } }
   /integrations/zentloop:
     get:
+      tags: [ZentLoop]
       summary: Get ZentLoop integration settings
       responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ZentLoopConfig' } } } } }
     put:
+      tags: [ZentLoop]
       summary: Update ZentLoop integration settings and routing rules
       requestBody:
         required: true
@@ -472,15 +578,18 @@ paths:
       responses: { '200': { description: Updated } }
   /integrations/zentloop/check:
     post:
+      tags: [ZentLoop]
       summary: Run an immediate ZentLoop reachability and signature verification check
       responses:
         '200': { description: Current ZentLoop health, content: { application/json: { schema: { $ref: '#/components/schemas/ZentLoopHealth' } } } }
   /audit:
     get:
+      tags: [Audit]
       summary: Get audit log
       responses: { '200': { description: OK } }
   /migration/analyze:
     post:
+      tags: [Migration]
       summary: Analyze a running migration source without modifying it
       description: Interactive administrator session only. Credentials are used for this request and are not persisted. Read-only migration mounts can supply certificate/private-key and Basic-Auth material that the remote API cannot safely expose.
       security: [{ sessionCookie: [] }]
@@ -492,6 +601,7 @@ paths:
         '502': { description: Source connection or analysis failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /migration/import:
     post:
+      tags: [Migration]
       summary: Import the supported source routing configuration
       description: Interactive administrator session only. The source is re-read before import. Proxy hosts, certificates, access lists, redirects, 404 hosts and streams are converted to native ZentProxy objects; final proxy activation is rolled back on failure.
       security: [{ sessionCookie: [] }]

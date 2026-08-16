@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zentproxy/zentproxy/internal/auth"
-	"github.com/zentproxy/zentproxy/internal/model"
-	_ "github.com/zentproxy/zentproxy/internal/sqlite"
+	"github.com/ZentWorks/ZentProxy/internal/auth"
+	"github.com/ZentWorks/ZentProxy/internal/model"
+	_ "github.com/ZentWorks/ZentProxy/internal/sqlite"
 )
 
 type Store struct {
@@ -1065,6 +1065,58 @@ func (s *Store) GetProvider(id int64) (model.TrustedProxyProvider, error) {
 	return scanProvider(s.db.QueryRow(`SELECT id,slug,name,kind,real_ip_header,auto_update,source_ipv4,source_ipv6,cidrs_json,last_checked,last_changed,last_error FROM trusted_proxy_providers WHERE id=?`, id))
 }
 
+func (s *Store) CreateProvider(slug string, in model.TrustedProxyProviderInput) (model.TrustedProxyProvider, error) {
+	cidrs, _ := json.Marshal(in.CIDRs)
+	res, err := s.db.Exec(`INSERT INTO trusted_proxy_providers(slug,name,kind,real_ip_header,auto_update,source_ipv4,source_ipv6,cidrs_json,last_error) VALUES(?,?,?,?,0,'','',?,'')`, slug, in.Name, "manual", in.Header, string(cidrs))
+	if err != nil {
+		return model.TrustedProxyProvider{}, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return model.TrustedProxyProvider{}, err
+	}
+	return s.GetProvider(id)
+}
+
+func (s *Store) UpdateProvider(id int64, in model.TrustedProxyProviderInput) (model.TrustedProxyProvider, error) {
+	cidrs, _ := json.Marshal(in.CIDRs)
+	res, err := s.db.Exec(`UPDATE trusted_proxy_providers SET name=?,real_ip_header=?,cidrs_json=?,last_error='' WHERE id=? AND kind='manual'`, in.Name, in.Header, string(cidrs), id)
+	if err != nil {
+		return model.TrustedProxyProvider{}, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return model.TrustedProxyProvider{}, sql.ErrNoRows
+	}
+	return s.GetProvider(id)
+}
+
+func (s *Store) DeleteProvider(id int64) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	var kind string
+	if err := tx.QueryRow(`SELECT kind FROM trusted_proxy_providers WHERE id=?`, id).Scan(&kind); err != nil {
+		return 0, err
+	}
+	if kind != "manual" {
+		return 0, fmt.Errorf("built-in provider cannot be deleted")
+	}
+	var affected int64
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM hosts WHERE trusted_proxy_provider_id=?`, id).Scan(&affected); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(`DELETE FROM trusted_proxy_providers WHERE id=?`, id); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return affected, nil
+}
+
 func scanProvider(row rowScanner) (model.TrustedProxyProvider, error) {
 	var p model.TrustedProxyProvider
 	var auto int
@@ -1331,6 +1383,9 @@ func (s *Store) topCounts(column, where string, args []any, limit int) ([]model.
 	allowed := map[string]bool{"host": true, "path": true, "ip": true}
 	if !allowed[column] {
 		return nil, fmt.Errorf("invalid column")
+	}
+	if column == "ip" {
+		where = "(" + where + ") AND ip <> ''"
 	}
 	q := `SELECT ` + column + `,COUNT(*) AS c FROM raw_requests WHERE ` + where + ` GROUP BY ` + column + ` ORDER BY c DESC LIMIT ?`
 	a := append(append([]any{}, args...), limit)

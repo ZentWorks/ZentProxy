@@ -19,6 +19,7 @@ type Config struct {
 	AdminPort            int
 	RawRetentionDays     int
 	AnalyticsLogMaxBytes int64
+	AnalyticsIPMode      string
 	ProviderRefreshEvery time.Duration
 	CookieSecure         bool
 	Version              string
@@ -47,8 +48,9 @@ func Load(version, commit string) (Config, error) {
 		LegacyAdminUser:      legacyAdminUser,
 		AdminPassword:        os.Getenv("ZENTPROXY_ADMIN_PASSWORD"),
 		AdminPort:            envInt("ZENTPROXY_ADMIN_PORT", 8080),
-		RawRetentionDays:     envInt("ZENTPROXY_RAW_RETENTION_DAYS", 7),
+		RawRetentionDays:     envIntFallback("ZENTPROXY_ANALYTICS_RETENTION_DAYS", "ZENTPROXY_RAW_RETENTION_DAYS", 7),
 		AnalyticsLogMaxBytes: int64(envInt("ZENTPROXY_ANALYTICS_LOG_MAX_MB", 64)) * 1024 * 1024,
+		AnalyticsIPMode:      strings.ToLower(env("ZENTPROXY_ANALYTICS_IP_MODE", "full")),
 		CookieSecure:         envBool("ZENTPROXY_ADMIN_COOKIE_SECURE", false),
 		Version:              version,
 		Commit:               commit,
@@ -63,6 +65,14 @@ func Load(version, commit string) (Config, error) {
 	}
 	if cfg.RawRetentionDays < 1 {
 		cfg.RawRetentionDays = 1
+	}
+	if cfg.RawRetentionDays > 30 {
+		cfg.RawRetentionDays = 30
+	}
+	switch cfg.AnalyticsIPMode {
+	case "full", "anonymized", "disabled":
+	default:
+		cfg.AnalyticsIPMode = "full"
 	}
 	if cfg.AnalyticsLogMaxBytes < 1024*1024 {
 		cfg.AnalyticsLogMaxBytes = 1024 * 1024
@@ -109,4 +119,11 @@ func envBool(key string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func envIntFallback(primary, legacy string, fallback int) int {
+	if strings.TrimSpace(os.Getenv(primary)) != "" {
+		return envInt(primary, fallback)
+	}
+	return envInt(legacy, fallback)
 }

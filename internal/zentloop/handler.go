@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zentproxy/zentproxy/internal/db"
+	"github.com/ZentWorks/ZentProxy/internal/db"
 )
 
 type Handler struct {

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zentproxy/zentproxy/internal/db"
-	"github.com/zentproxy/zentproxy/internal/model"
+	"github.com/ZentWorks/ZentProxy/internal/db"
+	"github.com/ZentWorks/ZentProxy/internal/model"
 )
 
 const analyticsCheckpoint = "access-jsonl"
@@ -31,6 +31,7 @@ func New(store *db.Store, dataDir string, retentionDays int, maxLogBytes int64, 
 }
 
 func (t *Tailer) Start(ctx context.Context) {
+	_ = t.store.CleanupRawRequests(t.retentionDays)
 	go t.run(ctx)
 	go func() {
 		ticker := time.NewTicker(6 * time.Hour)

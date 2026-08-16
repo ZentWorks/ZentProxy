@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zentproxy/zentproxy/internal/db"
+	"github.com/ZentWorks/ZentProxy/internal/db"
 )
 
 type Health struct {

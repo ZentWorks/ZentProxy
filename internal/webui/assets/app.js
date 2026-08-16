@@ -54,7 +54,7 @@ const titles = {
   routing: ['Routing', 'Redirects, 404 hosts and TCP/UDP streams.'],
   access: ['Access Lists', 'Reusable IP rules and authentication policies for proxy hosts.'],
   analytics: ['Analytics', 'Per-host traffic down to paths and client IPs.'],
-  providers: ['Trusted Proxies', 'Real client IP handling with maintained provider ranges.'],
+  providers: ['Trusted Proxies', 'Real client IP handling with built-in and custom trusted proxy providers.'],
   zentloop: ['ZentLoop', 'Route unmatched hosts into the deception backend.'],
   migration: ['Migration', 'Analyze first, then move the full supported configuration into ZentProxy.'],
   developers: ['Developer API', 'Scoped API keys and a stable versioned interface.'],
@@ -184,7 +184,8 @@ async function dashboard() {
     api('/api/v1/system/info'), api('/api/v1/stats/summary?range=24h'),
   ]);
   const info = obj(infoRaw), stats = obj(statsRaw);
-  $('#version').textContent = `${info.version || 'dev'} · API v1`;
+  const version = String(info.version || '').trim();
+  $('#version').textContent = version && version.toLowerCase() !== 'dev' ? `${version} · API v1` : 'API v1';
   $('#content').innerHTML = `
     <div class="cards">
       ${metric('proxy-hosts', 'Proxy hosts', `${fmtNum(info.enabled_hosts)}<span class="muted"> / ${fmtNum(info.hosts)}</span>`)}
@@ -544,8 +545,19 @@ function requestTable(rs) {
 }
 
 async function providers() {
-  const ps = arr(await loadProviders());
-  $('#content').innerHTML = `<div class="card">${sectionHeading('trusted-proxies', 'Trusted proxy providers', '<span class="muted">Provider ranges are used only when selected on a host.</span>')}<div class="table-wrap"><table><thead><tr><th>Provider</th><th>Client IP header</th><th>Ranges</th><th>Last checked</th><th>Status</th><th></th></tr></thead><tbody>${ps.map((p) => `<tr><td><strong>${esc(p.name)}</strong><div class="tiny muted">${esc(p.kind)}</div></td><td class="code">${esc(p.header)}</td><td>${arr(p.cidrs).length}</td><td>${p.last_checked ? new Date(p.last_checked).toLocaleString() : 'Never'}</td><td>${p.last_error ? `<span class="danger-text">${esc(p.last_error)}</span>` : '<span class="good-text">Current</span>'}</td><td><button class="btn small btn-icon" data-refresh-provider="${p.id}">${icon('refresh')}<span>Refresh</span></button></td></tr>`).join('')}</tbody></table></div></div>`;
+  const [psRaw, hsRaw] = await Promise.all([loadProviders(), api('/api/v1/hosts')]);
+  const ps = arr(psRaw), hs = arr(hsRaw); state.hosts = hs;
+  $('#top-actions').innerHTML = `<button id="add-provider" class="btn primary btn-icon">${icon('plus')}<span>Add provider</span></button>`;
+  const usageCount = (id) => hs.filter(h => h.trusted_proxy_provider_id === id).length;
+  $('#content').innerHTML = `<div class="card">${sectionHeading('trusted-proxies', 'Trusted proxy providers', '<span class="muted">Define trusted proxy or CDN networks for real client IP detection. A provider only takes effect when selected on a Proxy Host.</span>')}<div class="table-wrap"><table><thead><tr><th>Provider</th><th>Client IP header</th><th>Ranges</th><th>Used by hosts</th><th>Status</th><th></th></tr></thead><tbody>${ps.map((p) => {
+    const builtin = p.slug === 'cloudflare' || p.kind !== 'manual';
+    const status = p.last_error ? `<span class="danger-text">${esc(p.last_error)}</span>` : (builtin ? '<span class="good-text">Automatically maintained</span>' : '<span class="good-text">Manual</span>');
+    const actions = builtin
+      ? `<button class="btn small btn-icon" data-refresh-provider="${p.id}">${icon('refresh')}<span>Refresh</span></button>`
+      : `<button class="btn small" data-edit-provider="${p.id}">Edit</button><button class="btn small danger" data-delete-provider="${p.id}">Delete</button>`;
+    return `<tr><td><strong>${esc(p.name)}</strong><div class="tiny muted">${builtin ? 'Built-in provider' : 'Custom provider'}</div></td><td class="code">${esc(p.header)}</td><td>${fmtNum(arr(p.cidrs).length)}</td><td>${fmtNum(usageCount(p.id))}</td><td>${status}</td><td><div class="inline-actions">${actions}</div></td></tr>`;
+  }).join('')}</tbody></table></div></div>`;
+  $('#add-provider').onclick = () => openProviderEditor();
   $$('[data-refresh-provider]').forEach((b) => {
     b.onclick = async () => {
       b.disabled = true;
@@ -554,6 +566,31 @@ async function providers() {
       finally { b.disabled = false; }
     };
   });
+  $$('[data-edit-provider]').forEach((b) => b.onclick = () => openProviderEditor(ps.find(p => p.id === +b.dataset.editProvider)));
+  $$('[data-delete-provider]').forEach((b) => b.onclick = async () => {
+    const p = ps.find(x => x.id === +b.dataset.deleteProvider); if (!p) return;
+    const used = usageCount(p.id);
+    const message = used ? `${tr('Delete')} ${p.name}? ${used} ${tr('Proxy Host(s) will automatically switch to Direct / None.')}` : `${tr('Delete')} ${p.name}?`;
+    if (!confirm(message)) return;
+    try { const result = await api(`/api/v1/trusted-proxy-providers/${p.id}`, {method:'DELETE'}); toast(result.hosts_reset ? `${tr('Provider deleted')} · ${result.hosts_reset} ${tr('host(s) reset to Direct / None')}` : tr('Provider deleted')); await providers(); }
+    catch(e){ toast(e.message); }
+  });
+}
+
+function openProviderEditor(p=null) {
+  if (p && (p.slug === 'cloudflare' || p.kind !== 'manual')) return;
+  openEditorDialog(p ? 'Edit trusted proxy provider' : 'Add trusted proxy provider', `
+    <label>Name<input id="provider-name" value="${esc(p?.name||'')}" placeholder="Office reverse proxy" required></label>
+    <label>Client IP header<input id="provider-header" value="${esc(p?.header||'X-Forwarded-For')}" placeholder="X-Forwarded-For" required><small>The header that contains the original client IP after traffic passed through this provider.</small></label>
+    <label>Trusted IP addresses / CIDRs<textarea id="provider-cidrs" rows="9" placeholder="10.0.0.10&#10;192.168.1.0/24&#10;2001:db8::/32" required>${esc(arr(p?.cidrs).join('\n'))}</textarea><small>One IPv4/IPv6 address or CIDR per line. Individual addresses are normalized to /32 or /128.</small></label>
+    <div class="info-banner">Providers are inactive by default. Select this provider explicitly on the Proxy Hosts that should trust it.</div>`, {
+      saveLabel: p ? 'Save changes' : 'Add provider',
+      onSave: async () => {
+        const body = {name: $('#provider-name').value.trim(), header: $('#provider-header').value.trim(), cidrs: $('#provider-cidrs').value.split(/\n|,/).map(x=>x.trim()).filter(Boolean)};
+        await api(p ? `/api/v1/trusted-proxy-providers/${p.id}` : '/api/v1/trusted-proxy-providers', {method:p?'PUT':'POST', body:JSON.stringify(body)});
+        toast(p ? 'Provider updated' : 'Provider created'); await providers();
+      }
+    });
 }
 
 function openCertificateEditor(c){

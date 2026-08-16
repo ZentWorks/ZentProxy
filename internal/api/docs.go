@@ -9,26 +9,77 @@ const apiDocsHTML = `<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <title>ZentProxy Developer API</title>
+  <style>
+    :root{font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color-scheme:dark;background:#0b1016;color:#e6edf3;--panel:#121923;--panel2:#0e151e;--border:#2a3441;--muted:#8d99a8;--text:#e6edf3;--accent:#75a7ff}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:#0b1016;color:var(--text)}button,input{font:inherit}.wrap{max-width:1280px;margin:0 auto;padding:36px 22px 64px}
+    h1{font-size:36px;line-height:1.1;margin:0 0 9px;letter-spacing:-.025em}h2{font-size:22px;margin:0}h3{font-size:16px;margin:0}.muted{color:var(--muted)}.lead{font-size:16px;line-height:1.6;margin:0;max-width:800px}.code,code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    .hero{display:flex;justify-content:space-between;align-items:flex-start;gap:24px}.hero-side{display:flex;gap:8px;flex-wrap:wrap}.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 13px;border:1px solid var(--border);border-radius:9px;color:var(--text);text-decoration:none;background:#151d28;cursor:pointer}.btn:hover{border-color:#526071;background:#1a2431}.btn.small{padding:6px 9px;font-size:12px}.btn.primary{background:#1d4f91;border-color:#3776c8}.btn.primary:hover{background:#245ea9}
+    .overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:28px 0}.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:17px}.eyebrow{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}.big{font-size:19px;font-weight:700;margin-top:6px}.card p{margin:7px 0 0;line-height:1.5;font-size:13px}
+    .toolbar{position:sticky;top:0;z-index:5;background:rgba(11,16,22,.94);backdrop-filter:blur(10px);padding:14px 0 12px;margin-bottom:12px}.search{width:100%;border:1px solid var(--border);border-radius:10px;background:#0e151e;color:var(--text);padding:11px 13px;outline:none}.search:focus{border-color:#547fb8;box-shadow:0 0 0 3px rgba(84,127,184,.13)}
+    .category-nav{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0 0}.category-nav a{font-size:12px;text-decoration:none;color:#bdc7d4;border:1px solid var(--border);border-radius:999px;padding:5px 9px;background:#111923}.category-nav a:hover{border-color:#526071;color:#fff}
+    .category{margin-top:28px;scroll-margin-top:120px}.category-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:10px;padding:0 2px}.category-head p{margin:4px 0 0;color:var(--muted);font-size:13px}.count{font-size:12px;color:var(--muted)}
+    .endpoint{border:1px solid var(--border);border-radius:11px;background:var(--panel);margin:9px 0;overflow:hidden}.endpoint[open]{border-color:#3a4757}.endpoint-summary{display:grid;grid-template-columns:70px minmax(250px,.9fr) minmax(260px,1.2fr) 18px;align-items:center;gap:12px;padding:13px 14px;cursor:pointer;list-style:none}.endpoint-summary::-webkit-details-marker{display:none}.endpoint-summary:hover{background:#151e29}.method{display:inline-flex;justify-content:center;min-width:58px;padding:5px 7px;border-radius:6px;font:800 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em;border:1px solid transparent}.GET{color:#80d6a8;background:#123023;border-color:#24593c}.POST{color:#84b9ff;background:#142b49;border-color:#28588e}.PUT,.PATCH{color:#f5c96d;background:#382b12;border-color:#655023}.DELETE{color:#ff9d9d;background:#391a20;border-color:#6d303b}.path{font-size:13px;overflow-wrap:anywhere;color:#eef4fb}.summary-text{font-size:13px;color:#bbc6d2;line-height:1.45}.chev{color:var(--muted);font-size:18px;transition:transform .15s}.endpoint[open] .chev{transform:rotate(90deg)}
+    .endpoint-body{border-top:1px solid var(--border);padding:17px;background:var(--panel2)}.description{margin:0 0 16px;color:#c4ced9;line-height:1.55}.detail-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(300px,.8fr);gap:14px}.detail-card{border:1px solid var(--border);border-radius:9px;background:#111923;padding:13px}.detail-card h4{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0 0 10px}.kv{display:flex;gap:10px;justify-content:space-between;border-top:1px solid #222d39;padding:8px 0;font-size:13px}.kv:first-of-type{border-top:0}.status-pill{display:inline-flex;border-radius:6px;padding:3px 6px;background:#172330;color:#c9d5e2;font-family:ui-monospace,monospace;font-size:11px}.param{display:inline-block;background:#172330;border:1px solid #2b3b4e;border-radius:6px;padding:3px 6px;margin:2px 3px 2px 0;font:11px ui-monospace,monospace}
+    .code-card{margin-top:14px;border:1px solid var(--border);border-radius:9px;overflow:hidden;background:#091019}.code-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 11px;border-bottom:1px solid var(--border);background:#101823}.code-head strong{font-size:12px}.copy{border:0;background:transparent;color:#a9b7c6;cursor:pointer;font-size:12px}.copy:hover{color:#fff}pre{margin:0;padding:14px;overflow:auto;white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:12px;color:#d9e4ee}.request-body{margin-top:12px}.request-body pre{border:1px solid var(--border);border-radius:8px;background:#091019}
+    .empty{padding:22px;border:1px dashed var(--border);border-radius:10px;color:var(--muted)}.hidden{display:none!important}.spec{margin-top:30px;border:1px solid var(--border);border-radius:11px;background:var(--panel);overflow:hidden}.spec summary{cursor:pointer;padding:14px 16px;font-weight:650}.spec pre{border-top:1px solid var(--border);max-height:560px;white-space:pre}
+    @media(max-width:850px){.wrap{padding:25px 14px 42px}.hero{display:block}.hero-side{margin-top:18px}.overview{grid-template-columns:1fr}.endpoint-summary{grid-template-columns:62px 1fr 18px}.summary-text{grid-column:2}.chev{grid-column:3;grid-row:1/3}.detail-grid{grid-template-columns:1fr}.toolbar{top:0}h1{font-size:30px}}
+  </style>
 </head>
-<body>
-  <div id="app"></div>
-  <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.63.0"></script>
-  <script>
-    Scalar.createApiReference('#app', {
-      url: '/api/v1/openapi.yaml',
-      pageTitle: 'ZentProxy Developer API',
-      theme: 'default',
-      layout: 'modern',
-      darkMode: true,
-      hideClientButton: true,
-      hideTestRequestButton: false,
-      showToolbar: 'never',
-      agent: { disabled: true },
-      showSidebar: true
-    })
-  </script>
-</body>
-</html>`
+<body><main class="wrap">
+  <header class="hero"><div><h1>ZentProxy Developer API</h1><p class="lead muted">Understand the API at a glance: grouped operations, authentication, parameters, responses and ready-to-use curl requests generated from the local OpenAPI specification.</p></div><div class="hero-side"><a class="btn" href="/api/v1/openapi.yaml" download>Download OpenAPI YAML</a><a class="btn" href="/">Back to ZentProxy</a></div></header>
+  <section class="overview">
+    <div class="card"><div class="eyebrow">Installed API</div><div class="big" id="api-version">API v1</div><p class="muted">Stable versioned interface under <span class="code">/api/v1</span>.</p></div>
+    <div class="card"><div class="eyebrow">Authentication</div><div class="big">Bearer API key</div><p class="muted">Use a scoped API key in the <span class="code">Authorization</span> header. Interactive administrator sessions are also accepted where supported.</p></div>
+    <div class="card"><div class="eyebrow">Request format</div><div class="big">JSON over HTTPS</div><p class="muted">Write operations use <span class="code">application/json</span>. Keep API keys out of URLs and logs.</p></div>
+  </section>
+  <div class="toolbar"><input id="endpoint-search" class="search" type="search" placeholder="Search endpoints, paths or categories…"><nav id="category-nav" class="category-nav"></nav></div>
+  <h2 style="margin-top:6px">Endpoints</h2><div id="endpoint-status" class="muted" style="margin-top:6px">Loading OpenAPI specification…</div>
+  <div id="endpoints"><div class="empty">Loading endpoints…</div></div>
+  <details class="spec"><summary>OpenAPI specification (YAML)</summary><pre id="spec">Loading API specification…</pre></details>
+</main>
+<script>
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const methods=new Set(['get','post','put','patch','delete','head','options','trace']);
+const groupDescriptions={System:'System information and administrator preferences.','Proxy Hosts':'Reverse proxy hosts and their upstream targets.',Certificates:'TLS certificates and renewal.','Access Lists':'Reusable IP and authentication policies.',Routing:'Redirects, explicit 404 hosts and TCP/UDP streams.',Analytics:'Traffic summaries and recent request data.','Trusted Proxies':'Trusted proxy/CDN networks used to recover the original client IP.',ZentLoop:'ZentLoop integration, health and routing rules.',Audit:'Administrative change history.',Migration:'Analyze and import supported source configuration.'};
+const examples={
+ HostInput:{name:'Example app',domains:['app.example.com'],scheme:'http',forward_host:'10.0.0.20',forward_port:8080,enabled:true,websockets:true,preserve_host:true,statistics_enabled:true,store_query_string:false,trusted_proxy_provider_id:null,access_list_id:null,block_common_exploits:true,certificate_id:null,ssl_forced:false,http2_support:true,hsts_enabled:false,hsts_subdomains:false,caching_enabled:false,trust_forwarded_proto:false,advanced_config:'',custom_locations:[]},
+ TrustedProxyProviderInput:{name:'Office reverse proxy',header:'X-Forwarded-For',cidrs:['10.0.0.10','192.168.1.0/24']},
+ CertificateInput:{name:'example.com',domains:['example.com','www.example.com'],challenge:'http-01',email:'admin@example.com',auto_renew:true},
+ CertificateImportInput:{name:'Imported certificate',provider:'custom',domains:['example.com'],certificate_pem:'<PEM_CERTIFICATE>',private_key_pem:'<PEM_PRIVATE_KEY>',auto_renew:false},
+ CertificateMetadataInput:{name:'Production certificate',description:'Main public certificate'},
+ AccessListInput:{name:'Office access',satisfy_any:false,pass_auth:false,auth_enabled:false,rules:[{address:'10.0.0.0/8',directive:'allow'}]},
+ RedirectHostInput:{domains:['old.example.com'],forward_http_code:301,forward_scheme:'https',forward_domain_name:'example.com',preserve_path:true,certificate_id:null,ssl_forced:false,http2_support:true,hsts_enabled:false,hsts_subdomains:false,block_exploits:true,advanced_config:'',enabled:true},
+ DeadHostInput:{domains:['unused.example.com'],certificate_id:null,ssl_forced:false,http2_support:true,hsts_enabled:false,hsts_subdomains:false,advanced_config:'',enabled:true},
+ StreamInput:{incoming_port:5432,forward_host:'10.0.0.30',forward_port:5432,tcp_forwarding:true,udp_forwarding:false,certificate_id:null,enabled:true},
+ ZentLoopConfig:{enabled:true,upstream:'http://zentloop:8080',secret:'<SHARED_SECRET>',fallback:'block',ip_lists:[],rules:[]},
+ MigrationCredentials:{base_url:'https://source.example',identity:'admin@example.com',secret:'<SOURCE_PASSWORD>',tls_skip_verify:false},
+ MigrationImportRequest:{base_url:'https://source.example',identity:'admin@example.com',secret:'<SOURCE_PASSWORD>',tls_skip_verify:false,source_ids:[1,2]}
+};
+function clean(v){return String(v||'').trim().replace(/^['"]|['"]$/g,'').replace(/\s*\{$/,'')}
+function parseOpenAPI(text){
+ const lines=text.split(/\r?\n/),endpoints=[];let inPaths=false,path='',op=null,section='',version='';
+ for(const line of lines){
+  const vm=line.match(/^  version:\s*(.+?)\s*$/);if(vm&&!version)version=vm[1].replace(/^['"]|['"]$/g,'');
+  if(line==='paths:'){inPaths=true;continue}if(!inPaths)continue;if(/^\S/.test(line)){inPaths=false;continue}
+  const pm=line.match(/^  (\/[^:]+):\s*$/);if(pm){path=pm[1];op=null;section='';continue}
+  const mm=line.match(/^    ([a-z]+):\s*$/);if(mm&&methods.has(mm[1])){op={method:mm[1].toUpperCase(),path:path,summary:'',description:'',tag:'Other',schema:'',responses:[],security:'Bearer API key'};endpoints.push(op);section='';continue}
+  if(!op)continue;const tag=line.match(/^      tags:\s*\[([^\]]+)\]/);if(tag){op.tag=tag[1].trim();continue}const sm=line.match(/^      summary:\s*(.+?)\s*$/);if(sm){op.summary=clean(sm[1]);continue}const dm=line.match(/^      description:\s*(.+?)\s*$/);if(dm){op.description=clean(dm[1]);continue}
+  if(/^      requestBody:\s*$/.test(line)){section='request';continue}if(/^      responses:\s*/.test(line)){section='responses'}if(/^      security:\s*$/.test(line)){section='security';continue}
+  if(section==='request'){const ref=line.match(/\$ref:\s*['"]?#\/components\/schemas\/([^'" }]+)/);if(ref)op.schema=ref[1]}
+  if(section==='security'&&line.includes('sessionCookie'))op.security='Administrator session';
+  if(section==='responses'){for(const m of line.matchAll(/['"](\d{3})['"]:\s*\{\s*description:\s*([^},]+)/g))op.responses.push({status:m[1],description:clean(m[2])});const rs=line.match(/^        ['"](\d{3})['"]:\s*\{?\s*(?:description:\s*)?([^}]*)/);if(rs&&!op.responses.some(x=>x.status===rs[1]))op.responses.push({status:rs[1],description:clean(rs[2]||'')})}
+ }
+ return {version:version,endpoints:endpoints};
+}
+function pathParams(path){return [...path.matchAll(/\{([^}]+)\}/g)].map(m=>m[1])}
+function bodyFor(op){if(examples[op.schema])return examples[op.schema];if(op.path==='/user/preferences/language')return {language:'de'};if(op.path==='/user/preferences/proxy-hosts-view')return {view:'list'};return null}
+function shellSingleQuote(v){return "\'"+String(v).replace(/\'/g,"\'\\\'\'")+"\'"}
+function curlFor(op){let path=op.path.replace(/\{([^}]+)\}/g,'<$1>'),body=bodyFor(op),out='curl -X '+op.method+' \\\n  '+JSON.stringify(location.origin+'/api/v1'+path)+' \\\n  -H '+JSON.stringify('Authorization: Bearer <API_KEY>');if(body){const json=JSON.stringify(body,null,2);out+=' \\\n  -H '+JSON.stringify('Content-Type: application/json')+' \\\n  --data '+shellSingleQuote(json)}return out}
+function renderEndpoint(op,index){const params=pathParams(op.path),body=bodyFor(op),responses=op.responses.length?op.responses:[{status:'200',description:'Success'}],curl=curlFor(op);let paramHTML=params.length?params.map(x=>'<span class="param">'+esc(x)+'</span>').join(''):'None';let bodyHTML=body?'<div class="request-body"><pre>'+esc(JSON.stringify(body,null,2))+'</pre></div>':'';let responseHTML=responses.map(r=>'<div class="kv"><span class="status-pill">'+esc(r.status)+'</span><span>'+esc(r.description||'Response')+'</span></div>').join('');return '<details class="endpoint" data-search="'+esc((op.tag+' '+op.method+' '+op.path+' '+op.summary).toLowerCase())+'"><summary class="endpoint-summary"><span class="method '+op.method+'">'+op.method+'</span><span class="path">/api/v1'+esc(op.path)+'</span><span class="summary-text">'+esc(op.summary||'—')+'</span><span class="chev">›</span></summary><div class="endpoint-body">'+(op.description?'<p class="description">'+esc(op.description)+'</p>':'')+'<div class="detail-grid"><div class="detail-card"><h4>Request</h4><div class="kv"><span>Authentication</span><strong>'+esc(op.security)+'</strong></div><div class="kv"><span>Path parameters</span><span>'+paramHTML+'</span></div><div class="kv"><span>Request body</span><strong>'+(body?'application/json':'None')+'</strong></div>'+bodyHTML+'</div><div class="detail-card"><h4>Responses</h4>'+responseHTML+'</div></div><div class="code-card"><div class="code-head"><strong>Example request · curl</strong><button class="copy" type="button" data-copy="curl-'+index+'">Copy</button></div><pre id="curl-'+index+'">'+esc(curl)+'</pre></div></div></details>'}
+function slug(v){return String(v).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')}
+function render(parsed){const groups=new Map();for(const op of parsed.endpoints){if(!groups.has(op.tag))groups.set(op.tag,[]);groups.get(op.tag).push(op)}const nav=document.getElementById('category-nav'),box=document.getElementById('endpoints');let idx=0;nav.innerHTML=[...groups.keys()].map(g=>'<a href="#group-'+slug(g)+'">'+esc(g)+' · '+groups.get(g).length+'</a>').join('');box.innerHTML=[...groups].map(pair=>{const g=pair[0],ops=pair[1];return '<section class="category" id="group-'+slug(g)+'"><div class="category-head"><div><h2>'+esc(g)+'</h2><p>'+esc(groupDescriptions[g]||'')+'</p></div><span class="count">'+ops.length+' operation'+(ops.length===1?'':'s')+'</span></div>'+ops.map(op=>renderEndpoint(op,idx++)).join('')+'</section>'}).join('')||'<div class="empty">No endpoints found in the OpenAPI specification.</div>';document.querySelectorAll('[data-copy]').forEach(b=>b.onclick=async()=>{const el=document.getElementById(b.dataset.copy);try{await navigator.clipboard.writeText(el.textContent);const old=b.textContent;b.textContent='Copied';setTimeout(()=>b.textContent=old,1200)}catch{}})}
+fetch('/api/v1/openapi.yaml',{credentials:'same-origin'}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text()}).then(text=>{document.getElementById('spec').textContent=text;const parsed=parseOpenAPI(text);if(parsed.version)document.getElementById('api-version').textContent='API v1 · ZentProxy '+parsed.version;document.getElementById('endpoint-status').textContent=parsed.endpoints.length+' operations grouped from the local OpenAPI specification.';render(parsed);document.getElementById('endpoint-search').addEventListener('input',e=>{const q=e.target.value.trim().toLowerCase();document.querySelectorAll('.endpoint').forEach(x=>x.classList.toggle('hidden',q&&!x.dataset.search.includes(q)));document.querySelectorAll('.category').forEach(x=>x.classList.toggle('hidden',![...x.querySelectorAll('.endpoint')].some(e=>!e.classList.contains('hidden'))))})}).catch(e=>{document.getElementById('endpoint-status').textContent='Unable to load the local OpenAPI specification.';document.getElementById('endpoints').innerHTML='<div class="empty">'+esc(e.message)+'</div>';document.getElementById('spec').textContent='Unable to load OpenAPI specification: '+e.message});
+</script></body></html>`
 
 func (s *Server) apiDocs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

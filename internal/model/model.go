@@ -220,6 +220,12 @@ type StreamInput struct {
 	Enabled       bool   `json:"enabled"`
 }
 
+type TrustedProxyProviderInput struct {
+	Name   string   `json:"name"`
+	Header string   `json:"header"`
+	CIDRs  []string `json:"cidrs"`
+}
+
 type TrustedProxyProvider struct {
 	ID          int64      `json:"id"`
 	Slug        string     `json:"slug"`

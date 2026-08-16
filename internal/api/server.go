@@ -13,20 +13,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/zentproxy/zentproxy/internal/certificates"
-	"github.com/zentproxy/zentproxy/internal/config"
-	"github.com/zentproxy/zentproxy/internal/db"
-	"github.com/zentproxy/zentproxy/internal/migration"
-	"github.com/zentproxy/zentproxy/internal/model"
-	"github.com/zentproxy/zentproxy/internal/providers"
-	"github.com/zentproxy/zentproxy/internal/proxy"
-	"github.com/zentproxy/zentproxy/internal/webui"
-	"github.com/zentproxy/zentproxy/internal/zentloop"
+	"github.com/ZentWorks/ZentProxy/internal/certificates"
+	"github.com/ZentWorks/ZentProxy/internal/config"
+	"github.com/ZentWorks/ZentProxy/internal/db"
+	"github.com/ZentWorks/ZentProxy/internal/migration"
+	"github.com/ZentWorks/ZentProxy/internal/model"
+	"github.com/ZentWorks/ZentProxy/internal/providers"
+	"github.com/ZentWorks/ZentProxy/internal/proxy"
+	"github.com/ZentWorks/ZentProxy/internal/webui"
+	"github.com/ZentWorks/ZentProxy/internal/zentloop"
 )
 
 type Server struct {
@@ -122,6 +123,9 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/v1/stats/requests", s.require("stats:read", http.HandlerFunc(s.statsRequests)))
 
 	s.mux.Handle("GET /api/v1/trusted-proxy-providers", s.require("providers:read", http.HandlerFunc(s.providersList)))
+	s.mux.Handle("POST /api/v1/trusted-proxy-providers", s.require("providers:write", http.HandlerFunc(s.providerCreate)))
+	s.mux.Handle("PUT /api/v1/trusted-proxy-providers/{id}", s.require("providers:write", http.HandlerFunc(s.providerUpdate)))
+	s.mux.Handle("DELETE /api/v1/trusted-proxy-providers/{id}", s.require("providers:write", http.HandlerFunc(s.providerDelete)))
 	s.mux.Handle("POST /api/v1/trusted-proxy-providers/{id}/refresh", s.require("providers:write", http.HandlerFunc(s.providerRefresh)))
 
 	s.mux.Handle("GET /api/v1/integrations/zentloop", s.require("integrations:read", http.HandlerFunc(s.zentLoopGet)))
@@ -148,7 +152,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "same-origin")
 		if r.URL.Path == "/api/docs" || strings.HasPrefix(r.URL.Path, "/api/docs/") {
-			w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https:; connect-src 'self'; font-src 'self' data:; base-uri 'self'; frame-ancestors 'none'")
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:; base-uri 'self'; frame-ancestors 'none'")
 		} else {
 			w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'")
 		}
@@ -1287,6 +1291,163 @@ func (s *Server) providersList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, v)
+}
+
+func normalizeProviderInput(in model.TrustedProxyProviderInput) (model.TrustedProxyProviderInput, error) {
+	in.Name = strings.TrimSpace(in.Name)
+	in.Header = strings.TrimSpace(in.Header)
+	if in.Name == "" {
+		return in, fmt.Errorf("name is required")
+	}
+	if len(in.Name) > 100 {
+		return in, fmt.Errorf("name is too long")
+	}
+	if in.Header == "" || !validHeaderName(in.Header) {
+		return in, fmt.Errorf("client IP header is invalid")
+	}
+	seen := map[string]struct{}{}
+	normalized := make([]string, 0, len(in.CIDRs))
+	for _, raw := range in.CIDRs {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		var value string
+		if prefix, err := netip.ParsePrefix(raw); err == nil {
+			value = prefix.Masked().String()
+		} else if addr, err := netip.ParseAddr(raw); err == nil {
+			bits := 128
+			if addr.Is4() {
+				bits = 32
+			}
+			value = netip.PrefixFrom(addr, bits).String()
+		} else {
+			return in, fmt.Errorf("invalid IP address or CIDR: %s", raw)
+		}
+		if _, ok := seen[value]; !ok {
+			seen[value] = struct{}{}
+			normalized = append(normalized, value)
+		}
+	}
+	if len(normalized) == 0 {
+		return in, fmt.Errorf("at least one trusted IP address or CIDR is required")
+	}
+	if len(normalized) > 5000 {
+		return in, fmt.Errorf("too many trusted IP ranges")
+	}
+	sort.Strings(normalized)
+	in.CIDRs = normalized
+	return in, nil
+}
+
+func validHeaderName(v string) bool {
+	if v == "" {
+		return false
+	}
+	for _, c := range v {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || strings.ContainsRune("!#$%&'*+-.^_`|~", c) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func (s *Server) providerCreate(w http.ResponseWriter, r *http.Request) {
+	var in model.TrustedProxyProviderInput
+	if err := decodeJSON(r, &in); err != nil {
+		jsonError(w, 400, err.Error())
+		return
+	}
+	in, err := normalizeProviderInput(in)
+	if err != nil {
+		jsonError(w, 422, err.Error())
+		return
+	}
+	slug := "custom-" + strconv.FormatInt(time.Now().UTC().UnixNano(), 36)
+	p, err := s.store.CreateProvider(slug, in)
+	if err != nil {
+		jsonError(w, 500, "cannot create provider")
+		return
+	}
+	s.store.AddAudit(actor(r), "create", "trusted-proxy-provider", strconv.FormatInt(p.ID, 10), p.Name)
+	writeJSON(w, 201, p)
+}
+
+func (s *Server) providerUpdate(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	existing, err := s.store.GetProvider(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		jsonError(w, 404, "provider not found")
+		return
+	}
+	if err != nil {
+		jsonError(w, 500, "cannot load provider")
+		return
+	}
+	if existing.Kind != "manual" {
+		jsonError(w, 409, "built-in provider cannot be edited")
+		return
+	}
+	var in model.TrustedProxyProviderInput
+	if err := decodeJSON(r, &in); err != nil {
+		jsonError(w, 400, err.Error())
+		return
+	}
+	in, err = normalizeProviderInput(in)
+	if err != nil {
+		jsonError(w, 422, err.Error())
+		return
+	}
+	p, err := s.store.UpdateProvider(id, in)
+	if err != nil {
+		jsonError(w, 500, "cannot update provider")
+		return
+	}
+	if err := s.proxy.Apply(); err != nil {
+		jsonError(w, 500, "provider saved but proxy reload failed: "+err.Error())
+		return
+	}
+	s.store.AddAudit(actor(r), "update", "trusted-proxy-provider", strconv.FormatInt(id, 10), p.Name)
+	writeJSON(w, 200, p)
+}
+
+func (s *Server) providerDelete(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	p, err := s.store.GetProvider(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		jsonError(w, 404, "provider not found")
+		return
+	}
+	if err != nil {
+		jsonError(w, 500, "cannot load provider")
+		return
+	}
+	if p.Kind != "manual" {
+		jsonError(w, 409, "built-in provider cannot be deleted")
+		return
+	}
+	affected, err := s.store.DeleteProvider(id)
+	if err != nil {
+		jsonError(w, 500, "cannot delete provider")
+		return
+	}
+	if err := s.proxy.Apply(); err != nil {
+		jsonError(w, 500, "provider deleted but proxy reload failed: "+err.Error())
+		return
+	}
+	detail := p.Name
+	if affected > 0 {
+		detail = fmt.Sprintf("%s · %d host(s) reset to Direct / None", p.Name, affected)
+	}
+	s.store.AddAudit(actor(r), "delete", "trusted-proxy-provider", strconv.FormatInt(id, 10), detail)
+	writeJSON(w, 200, map[string]any{"deleted": true, "hosts_reset": affected})
 }
 func (s *Server) providerRefresh(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)

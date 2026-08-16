@@ -6,7 +6,7 @@
 
 ZentProxy is a Docker-based reverse proxy management solution with a web interface for managing proxy hosts, certificates, access rules, analytics and related services in one place.
 
-> **Status:** The repository may initially be private while release builds, container publishing and installation paths are being validated.
+> **Under Development**
 
 ## Features
 
@@ -20,30 +20,6 @@ ZentProxy is a Docker-based reverse proxy management solution with a web interfa
 - Suitable for Unraid deployments
 - Integrated detailed documentation directly inside ZentProxy
 - Multi-architecture container images for `linux/amd64` and `linux/arm64`
-
-## Screenshots
-
-Screenshots can be stored in `docs/screenshots/` and referenced directly from this README.
-
-<!--
-Uncomment and adapt when screenshots are available:
-
-### Dashboard
-
-![ZentProxy Dashboard](docs/screenshots/dashboard.png)
-
-### Proxy Hosts
-
-![ZentProxy Proxy Hosts](docs/screenshots/proxy-hosts.png)
-
-### Analytics
-
-![ZentProxy Analytics](docs/screenshots/analytics.png)
--->
-
-Relative paths allow screenshots to be displayed directly in the GitHub repository without an external image host.
-
----
 
 # Quick start
 
@@ -80,7 +56,8 @@ ZENTPROXY_ADMIN_PASSWORD=
 ZENTPROXY_ADMIN_PORT=8080
 
 ZENTPROXY_DATA_DIR=/data
-ZENTPROXY_RAW_RETENTION_DAYS=7
+ZENTPROXY_ANALYTICS_RETENTION_DAYS=7
+ZENTPROXY_ANALYTICS_IP_MODE=anonymized
 ZENTPROXY_ANALYTICS_LOG_MAX_MB=64
 ZENTPROXY_PROVIDER_REFRESH_HOURS=6
 
@@ -98,7 +75,7 @@ ZENTPROXY_ADMIN_EMAIL=you@example.com
 
 For a fresh installation, `ZENTPROXY_ADMIN_PASSWORD` may be left empty. ZentProxy will then generate a random bootstrap password and print it once to the container log.
 
-Create `compose.yaml`:
+Create `docker-compose.yml`:
 
 ```yaml
 services:
@@ -107,26 +84,16 @@ services:
     container_name: zentproxy
     restart: unless-stopped
 
-    ports:
-      - "80:80/tcp"
-      - "443:443/tcp"
-      - "443:443/udp"
-      - "${ZENTPROXY_ADMIN_PORT:-8080}:${ZENTPROXY_ADMIN_PORT:-8080}/tcp"
+    env_file:
+      - .env
 
-    environment:
-      TZ: "${TZ:-Europe/Berlin}"
-      ZENTPROXY_ADMIN_EMAIL: "${ZENTPROXY_ADMIN_EMAIL:-}"
-      ZENTPROXY_ADMIN_PASSWORD: "${ZENTPROXY_ADMIN_PASSWORD:-}"
-      ZENTPROXY_ADMIN_PORT: "${ZENTPROXY_ADMIN_PORT:-8080}"
-      ZENTPROXY_DATA_DIR: "/data"
-      ZENTPROXY_RAW_RETENTION_DAYS: "${ZENTPROXY_RAW_RETENTION_DAYS:-7}"
-      ZENTPROXY_ANALYTICS_LOG_MAX_MB: "${ZENTPROXY_ANALYTICS_LOG_MAX_MB:-64}"
-      ZENTPROXY_PROVIDER_REFRESH_HOURS: "${ZENTPROXY_PROVIDER_REFRESH_HOURS:-6}"
-      ZENTPROXY_ADMIN_COOKIE_SECURE: "${ZENTPROXY_ADMIN_COOKIE_SECURE:-false}"
-      ZENTPROXY_TRUSTED_TRANSPORT_HOPS: "${ZENTPROXY_TRUSTED_TRANSPORT_HOPS:-}"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "${ZENTPROXY_ADMIN_PORT:-8080}:${ZENTPROXY_ADMIN_PORT:-8080}"
 
     volumes:
-      - ./data:/data
+      - ./data:${ZENTPROXY_DATA_DIR:-/data}
 ```
 
 Start ZentProxy:
@@ -169,9 +136,8 @@ docker run -d \
   --restart unless-stopped \
   --env-file .env \
   -p 80:80 \
-  -p 443:443/tcp \
-  -p 443:443/udp \
-  -p 8080:8080/tcp \
+  -p 443:443 \
+  -p 8080:8080 \
   -v "$(pwd)/data:/data" \
   ghcr.io/zentworks/zentproxy:latest
 ```
@@ -191,16 +157,16 @@ docker run -d \
   --name zentproxy \
   --restart unless-stopped \
   -p 80:80 \
-  -p 443:443/tcp \
-  -p 443:443/udp \
-  -p 8080:8080/tcp \
+  -p 443:443 \
+  -p 8080:8080 \
   -v "$(pwd)/data:/data" \
   -e TZ=Europe/Berlin \
   -e ZENTPROXY_ADMIN_EMAIL=admin@example.com \
   -e ZENTPROXY_ADMIN_PASSWORD= \
   -e ZENTPROXY_ADMIN_PORT=8080 \
   -e ZENTPROXY_DATA_DIR=/data \
-  -e ZENTPROXY_RAW_RETENTION_DAYS=7 \
+  -e ZENTPROXY_ANALYTICS_RETENTION_DAYS=7 \
+  -e ZENTPROXY_ANALYTICS_IP_MODE=anonymized \
   -e ZENTPROXY_ANALYTICS_LOG_MAX_MB=64 \
   -e ZENTPROXY_PROVIDER_REFRESH_HOURS=6 \
   -e ZENTPROXY_ADMIN_COOKIE_SECURE=false \
@@ -233,7 +199,8 @@ Then edit `.env` before starting ZentProxy.
 | `ZENTPROXY_ADMIN_PASSWORD` | empty | No | Initial administrator password. If empty, ZentProxy generates a random bootstrap password and prints it once to the container log. |
 | `ZENTPROXY_ADMIN_PORT` | `8080` | No | Port used by the ZentProxy administration interface. |
 | `ZENTPROXY_DATA_DIR` | `/data` | No | Persistent data directory inside the container. |
-| `ZENTPROXY_RAW_RETENTION_DAYS` | `7` | No | Retention period for raw analytics data, in days. |
+| `ZENTPROXY_ANALYTICS_RETENTION_DAYS` | `7` | No | Analytics retention in days. Effective range is 1–30; larger values are capped at 30. |
+| `ZENTPROXY_ANALYTICS_IP_MODE` | `anonymized` | No | Client IP storage: `full`, `anonymized`, or `disabled`. |
 | `ZENTPROXY_ANALYTICS_LOG_MAX_MB` | `64` | No | Maximum size in MB of the temporary JSON analytics access-log spool. Processed data is stored in SQLite. |
 | `ZENTPROXY_PROVIDER_REFRESH_HOURS` | `6` | No | Refresh interval for provider-related data, in hours. |
 | `ZENTPROXY_ADMIN_COOKIE_SECURE` | `false` | No | Controls the Secure attribute of the administrator session cookie. Enable it when the administration interface is served exclusively through HTTPS. |
@@ -246,26 +213,6 @@ ZENTPROXY_TRUSTED_TRANSPORT_HOPS=192.168.65.1
 ```
 
 Do not set trusted transport hops unless they are actually required for the deployment environment.
-
-### Secrets
-
-The real `.env` file must **not** be committed to GitHub.
-
-The public repository should contain only:
-
-```text
-.env.example
-```
-
-and never:
-
-```text
-.env
-.env.local
-.env.production
-```
-
-Do not commit passwords, API credentials, private keys or other secrets.
 
 ---
 
@@ -364,40 +311,6 @@ This GitHub repository focuses on:
 
 ---
 
-# Container images
-
-Images are built automatically through GitHub Actions and published to:
-
-```text
-ghcr.io/zentworks/zentproxy
-```
-
-Supported target platforms:
-
-```text
-linux/amd64
-linux/arm64
-```
-
-The `latest` tag is intended for the current stable release.
-
-Version tags can be generated from Git tags such as:
-
-```text
-v1.0.0
-```
-
-resulting in images such as:
-
-```text
-ghcr.io/zentworks/zentproxy:latest
-ghcr.io/zentworks/zentproxy:1
-ghcr.io/zentworks/zentproxy:1.0
-ghcr.io/zentworks/zentproxy:1.0.0
-```
-
----
-
 # Updating
 
 ## Docker Compose
@@ -471,25 +384,6 @@ For production operation:
 - use HTTPS for administrative access where appropriate
 - set `ZENTPROXY_ADMIN_COOKIE_SECURE=true` when the administration interface is exclusively accessed over HTTPS
 - configure trusted transport hops only when required by the actual network topology
-
----
-
-# Project files and deployment files
-
-The public GitHub repository contains only files required for users, releases and container builds.
-
-Internal development files, tests, debug output, local configuration and deployment-helper files are not intended to be part of the public release.
-
-In particular, local release tooling such as:
-
-```text
-deploy.sh
-.github-release/
-```
-
-is used to prepare the GitHub export and is not part of the ZentProxy Docker image.
-
-Likewise, GitHub workflow metadata is excluded from the Docker build context through `.dockerignore`.
 
 ---
 

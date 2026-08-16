@@ -20,8 +20,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zentproxy/zentproxy/internal/model"
-	"github.com/zentproxy/zentproxy/internal/proxy"
+	"github.com/ZentWorks/ZentProxy/internal/model"
+	"github.com/ZentWorks/ZentProxy/internal/proxy"
 )
 
 const maxResponseBytes = 16 << 20

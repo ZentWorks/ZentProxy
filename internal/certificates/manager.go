@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zentproxy/zentproxy/internal/db"
-	"github.com/zentproxy/zentproxy/internal/model"
+	"github.com/ZentWorks/ZentProxy/internal/db"
+	"github.com/ZentWorks/ZentProxy/internal/model"
 )
 
 var envNameRE = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
