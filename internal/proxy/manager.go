@@ -153,6 +153,50 @@ func normalizeServerName(v string) string {
 	return v
 }
 
+var commonCountrySecondLevels = map[string]struct{}{
+	"ac": {}, "asn": {}, "co": {}, "com": {}, "edu": {}, "firm": {}, "gen": {}, "go": {}, "gov": {}, "id": {}, "ind": {}, "ltd": {}, "me": {}, "mil": {}, "net": {}, "ne": {}, "nom": {}, "or": {}, "org": {}, "plc": {}, "sch": {},
+}
+
+func registrableDomain(domain string) string {
+	d := normalizeServerName(domain)
+	d = strings.TrimPrefix(d, "*.")
+	d = strings.TrimSuffix(d, ".")
+	if d == "" || net.ParseIP(strings.Trim(d, "[]")) != nil {
+		return ""
+	}
+	parts := strings.Split(d, ".")
+	if len(parts) < 2 {
+		return d
+	}
+	tld, sld := parts[len(parts)-1], parts[len(parts)-2]
+	if len(tld) == 2 && len(parts) >= 3 {
+		if _, ok := commonCountrySecondLevels[sld]; ok {
+			return strings.Join(parts[len(parts)-3:], ".")
+		}
+	}
+	return strings.Join(parts[len(parts)-2:], ".")
+}
+
+func zentLoopRootDomains(hosts []model.Host) []string {
+	roots := map[string]struct{}{}
+	for _, host := range hosts {
+		if !host.Enabled {
+			continue
+		}
+		for _, domain := range host.Domains {
+			if root := registrableDomain(domain); root != "" {
+				roots[root] = struct{}{}
+			}
+		}
+	}
+	out := make([]string, 0, len(roots))
+	for root := range roots {
+		out = append(out, root)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func validServerName(v string) bool {
 	if v == "" || strings.ContainsAny(v, " \t\r\n;{}\\/") {
 		return false
@@ -441,6 +485,14 @@ __ZP_KNOWN_HOSTS__    }
         default 0;
 __ZP_DEAD_HOSTS__    }
 
+    # Root domains are derived automatically from enabled Proxy Hosts using the
+    # same grouping rules as the WebUI. A leading dot matches the root itself
+    # and any real subdomain, but never suffix tricks such as example.com.evil.tld.
+    map $host $zp_known_root_domain {
+        hostnames;
+        default 0;
+__ZP_ROOT_DOMAINS__    }
+
 `, data, pid, data, data, data, data, data, data)
 
 	known := map[string]bool{}
@@ -502,6 +554,12 @@ __ZP_DEAD_HOSTS__    }
 		fmt.Fprintf(&deadLines, "        %s 1;\n", domain)
 	}
 	confHead = strings.Replace(confHead, "__ZP_DEAD_HOSTS__", deadLines.String(), 1)
+
+	var rootLines strings.Builder
+	for _, root := range zentLoopRootDomains(hosts) {
+		fmt.Fprintf(&rootLines, "        .%s 1;\n", root)
+	}
+	confHead = strings.Replace(confHead, "__ZP_ROOT_DOMAINS__", rootLines.String(), 1)
 
 	// Resolve Cloudflare trust by requested host name before analytics/proxy
 	// headers are evaluated. This keeps the canonical-IP decision independent of
@@ -569,6 +627,9 @@ __ZP_DEAD_HOSTS__    }
         location ^~ /.well-known/acme-challenge/ { root %s/acme-webroot; try_files $uri =404; access_log off; }
 `, data, data)
 	if zentLoop.Enabled {
+		if !zentLoop.ForwardUnknownHosts {
+			b.WriteString("        if ($zp_known_root_domain = 0) { return 404; }\n")
+		}
 		b.WriteString(`        location / {
             proxy_pass http://127.0.0.1:18081;
             proxy_http_version 1.1;
@@ -596,6 +657,9 @@ __ZP_DEAD_HOSTS__    }
         if ($zp_known_host = 1) { return 421; }
 `, data, data, data)
 	if zentLoop.Enabled {
+		if !zentLoop.ForwardUnknownHosts {
+			b.WriteString("        if ($zp_known_root_domain = 0) { return 404; }\n")
+		}
 		b.WriteString(`        location / {
             proxy_pass http://127.0.0.1:18081;
             proxy_http_version 1.1;

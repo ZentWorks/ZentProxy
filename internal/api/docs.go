@@ -51,7 +51,7 @@ const examples={
  RedirectHostInput:{domains:['old.example.com'],forward_http_code:301,forward_scheme:'https',forward_domain_name:'example.com',preserve_path:true,certificate_id:null,ssl_forced:false,http2_support:true,hsts_enabled:false,hsts_subdomains:false,block_exploits:true,advanced_config:'',enabled:true},
  DeadHostInput:{domains:['unused.example.com'],certificate_id:null,ssl_forced:false,http2_support:true,hsts_enabled:false,hsts_subdomains:false,advanced_config:'',enabled:true},
  StreamInput:{incoming_port:5432,forward_host:'10.0.0.30',forward_port:5432,tcp_forwarding:true,udp_forwarding:false,certificate_id:null,enabled:true},
- ZentLoopConfig:{enabled:true,upstream:'http://zentloop:8080',secret:'<SHARED_SECRET>',fallback:'block',ip_lists:[],rules:[]},
+ ZentLoopConfig:{enabled:true,forward_unknown_hosts:false,upstream:'http://zentloop:8080',secret:'<SHARED_SECRET>',fallback:'block',ip_lists:[],rules:[]},
  MigrationCredentials:{base_url:'https://source.example',identity:'admin@example.com',secret:'<SOURCE_PASSWORD>',tls_skip_verify:false},
  MigrationImportRequest:{base_url:'https://source.example',identity:'admin@example.com',secret:'<SOURCE_PASSWORD>',tls_skip_verify:false,source_ids:[1,2]}
 };

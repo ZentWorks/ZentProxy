@@ -1480,7 +1480,7 @@ func (s *Server) zentLoopGet(w http.ResponseWriter, r *http.Request) {
 	if s.zentLoop != nil {
 		health = s.zentLoop.Snapshot()
 	}
-	writeJSON(w, 200, map[string]any{"enabled": cfg.Enabled, "upstream": cfg.Upstream, "secret": cfg.Secret, "fallback": cfg.Fallback, "ip_lists": cfg.IPLists, "rules": cfg.Rules, "health": health})
+	writeJSON(w, 200, map[string]any{"enabled": cfg.Enabled, "forward_unknown_hosts": cfg.ForwardUnknownHosts, "upstream": cfg.Upstream, "secret": cfg.Secret, "fallback": cfg.Fallback, "ip_lists": cfg.IPLists, "rules": cfg.Rules, "health": health})
 }
 func (s *Server) zentLoopSet(w http.ResponseWriter, r *http.Request) {
 	old, err := s.store.GetZentLoop()
@@ -1586,7 +1586,7 @@ func (s *Server) zentLoopSet(w http.ResponseWriter, r *http.Request) {
 	if s.zentLoop != nil {
 		s.zentLoop.CheckNow(r.Context())
 	}
-	s.store.AddAudit(actor(r), "update", "integration", "zentloop", fmt.Sprintf("enabled=%v upstream=%s", in.Enabled, in.Upstream))
+	s.store.AddAudit(actor(r), "update", "integration", "zentloop", fmt.Sprintf("enabled=%v forward_unknown_hosts=%v upstream=%s", in.Enabled, in.ForwardUnknownHosts, in.Upstream))
 	out := in
 	if out.Secret != "" {
 		out.Secret = "********"
@@ -1595,7 +1595,7 @@ func (s *Server) zentLoopSet(w http.ResponseWriter, r *http.Request) {
 	if s.zentLoop != nil {
 		health = s.zentLoop.Snapshot()
 	}
-	writeJSON(w, 200, map[string]any{"enabled": out.Enabled, "upstream": out.Upstream, "secret": out.Secret, "fallback": out.Fallback, "ip_lists": out.IPLists, "rules": out.Rules, "health": health})
+	writeJSON(w, 200, map[string]any{"enabled": out.Enabled, "forward_unknown_hosts": out.ForwardUnknownHosts, "upstream": out.Upstream, "secret": out.Secret, "fallback": out.Fallback, "ip_lists": out.IPLists, "rules": out.Rules, "health": health})
 }
 
 func (s *Server) zentLoopCheck(w http.ResponseWriter, r *http.Request) {

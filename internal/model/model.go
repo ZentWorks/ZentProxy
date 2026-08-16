@@ -256,12 +256,13 @@ type ZentLoopRule struct {
 }
 
 type ZentLoopConfig struct {
-	Enabled  bool             `json:"enabled"`
-	Upstream string           `json:"upstream"`
-	Secret   string           `json:"secret,omitempty"`
-	Fallback string           `json:"fallback,omitempty"`
-	IPLists  []ZentLoopIPList `json:"ip_lists"`
-	Rules    []ZentLoopRule   `json:"rules"`
+	Enabled             bool             `json:"enabled"`
+	ForwardUnknownHosts bool             `json:"forward_unknown_hosts"`
+	Upstream            string           `json:"upstream"`
+	Secret              string           `json:"secret,omitempty"`
+	Fallback            string           `json:"fallback,omitempty"`
+	IPLists             []ZentLoopIPList `json:"ip_lists"`
+	Rules               []ZentLoopRule   `json:"rules"`
 }
 type APIKey struct {
 	ID        int64      `json:"id"`

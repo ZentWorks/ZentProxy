@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: ZentProxy API
-  version: 0.6.7
+  version: 0.7.9
   description: Versioned API for ZentProxy proxy management, certificates, routing, analytics, trusted proxies, integrations, user preferences and migration tooling.
 servers:
   - url: /api/v1
@@ -111,9 +111,10 @@ components:
         host_ids: { type: array, items: { type: integer }, description: Empty means all proxy hosts }
     ZentLoopConfig:
       type: object
-      required: [enabled, upstream, ip_lists, rules]
+      required: [enabled, forward_unknown_hosts, upstream, ip_lists, rules]
       properties:
         enabled: { type: boolean }
+        forward_unknown_hosts: { type: boolean, description: Forward hostnames outside automatically derived Proxy Host root domains to ZentLoop. Defaults to false. }
         upstream: { type: string }
         secret: { type: string }
         fallback: { type: string, enum: [block, '503'], description: Behavior when ZentLoop is unavailable }

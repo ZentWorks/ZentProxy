@@ -108,13 +108,13 @@
     A('zentloop','ZentLoop Integration',
       {title:'ZentLoop Integration',summary:'Connect ZentProxy to ZentLoop for catch-all and deception workflows.',sections:[
         ['Purpose',['ZentLoop is integrated through a proxy-neutral protocol instead of being compiled into the proxy core. This keeps both projects independently usable.']],
-        ['Catch-all routing',['ZentProxy can forward otherwise unmatched host requests to ZentLoop and supplies integration metadata about the original target.']],
+        ['Catch-all routing',['ZentProxy automatically derives known root domains from configured Proxy Hosts. Unconfigured subdomains inside those domains can use the ZentLoop catch-all. Hostnames outside all known root domains reach ZentLoop only when the Unknown/Fake Hosts toggle is enabled.']],
         ['Signed ingress',['An optional shared secret signs integration metadata with HMAC-SHA256. ZentProxy also performs a signed integration check so a wrong or outdated secret is visible as a mismatch before traffic depends on it.']],
         ['Health and fallback',['ZentProxy checks ZentLoop every 15 seconds and shows reachability, signature state, latency and errors. If the integration is unavailable or a configured signature cannot be verified, routing fails closed with the selected 403 or 503 fallback instead of hanging.']]
       ]},
       {title:'ZentLoop-Integration',summary:'ZentProxy mit ZentLoop für Catch-All- und Deception-Abläufe verbinden.',sections:[
         ['Zweck',['ZentLoop wird über ein proxy-neutrales Protokoll angebunden und nicht fest in den Proxy-Kern kompiliert. So bleiben beide Projekte unabhängig nutzbar.']],
-        ['Catch-All-Routing',['ZentProxy kann ansonsten nicht zugeordnete Host-Anfragen an ZentLoop weitergeben und Metadaten über das ursprüngliche Ziel mitsenden.']],
+        ['Catch-All-Routing',['ZentProxy leitet bekannte Root-Domains automatisch aus den konfigurierten Proxy Hosts ab. Nicht konfigurierte Subdomains innerhalb dieser Domains können den ZentLoop-Catch-All verwenden. Hostnamen außerhalb aller bekannten Root-Domains erreichen ZentLoop nur, wenn der Schalter für Unknown/Fake Hosts aktiviert ist.']],
         ['Signierter Ingress',['Ein optionales gemeinsames Secret signiert Integrationsmetadaten per HMAC-SHA256. ZentProxy führt zusätzlich eine signierte Integrationsprüfung durch, damit ein falsches oder veraltetes Secret vor dem Routing als Fehler sichtbar wird.']],
         ['Health und Fallback',['ZentProxy prüft ZentLoop alle 15 Sekunden und zeigt Erreichbarkeit, Signaturstatus, Latenz und Fehler. Ist die Integration nicht verfügbar oder kann eine konfigurierte Signatur nicht verifiziert werden, greift der gewählte 403- oder 503-Fallback statt den Request hängen zu lassen.']]
       ]}),
