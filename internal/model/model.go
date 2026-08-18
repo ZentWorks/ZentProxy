@@ -289,6 +289,7 @@ type RawRequest struct {
 	Referer        string    `json:"referer,omitempty"`
 	HTTPVersion    string    `json:"http_version,omitempty"`
 	TLSVersion     string    `json:"tls_version,omitempty"`
+	ZentLoop       bool      `json:"zentloop"`
 }
 type StatsSummary struct {
 	Since         time.Time        `json:"since"`

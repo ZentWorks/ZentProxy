@@ -1267,7 +1267,7 @@ func parseSince(r *http.Request) time.Time {
 	}
 }
 func (s *Server) statsSummary(w http.ResponseWriter, r *http.Request) {
-	v, err := s.store.StatsSummary(parseSince(r), strings.TrimSpace(r.URL.Query().Get("host")))
+	v, err := s.store.StatsSummary(parseSince(r), strings.TrimSpace(r.URL.Query().Get("host")), strings.TrimSpace(r.URL.Query().Get("zentloop")))
 	if err != nil {
 		jsonError(w, 500, "cannot calculate statistics")
 		return
@@ -1276,7 +1276,7 @@ func (s *Server) statsSummary(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) statsRequests(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	v, err := s.store.RecentRequests(parseSince(r), strings.TrimSpace(r.URL.Query().Get("host")), limit)
+	v, err := s.store.RecentRequests(parseSince(r), strings.TrimSpace(r.URL.Query().Get("host")), strings.TrimSpace(r.URL.Query().Get("zentloop")), limit)
 	if err != nil {
 		jsonError(w, 500, "cannot load requests")
 		return

@@ -44,7 +44,7 @@ new MutationObserver((mutations) => {
 
 const state = {
   csrf: '', me: null, providers: [], hosts: [], page: 'dashboard', poll: null,
-  migrationCreds: null, migrationImporting: false, certificates: [], accessLists: [], docsArticle: 'getting-started', hostDomains: [], hostSearch: '', hostView: 'list', collapsedHostGroups: new Set(), analyticsAuto: true, analyticsRange: '24h', analyticsHost: '', analyticsCountdown: 5,
+  migrationCreds: null, migrationImporting: false, certificates: [], accessLists: [], docsArticle: 'getting-started', hostDomains: [], hostSearch: '', hostView: 'list', collapsedHostGroups: new Set(), analyticsAuto: true, analyticsRange: '24h', analyticsHost: '', analyticsZentLoop: 'all', analyticsCountdown: 5,
 };
 
 const titles = {
@@ -466,88 +466,123 @@ async function certificatesPage() {
 function certificateTable(certs) { certs=arr(certs); if(!certs.length)return '<div class="empty">No certificates yet.</div>'; return `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Description</th><th>Domains</th><th>Provider</th><th>Expires</th><th>Renewal</th><th></th></tr></thead><tbody>${certs.map((c)=>{const dc=arr(c.domains).length;return `<tr><td><strong>${esc(c.name)}</strong></td><td class="muted">${esc(c.description||'—')}</td><td class="certificate-domain-count">${fmtNum(dc)}</td><td>${esc(c.provider)}</td><td>${c.expires_at?new Date(c.expires_at).toLocaleString():'Unknown'}</td><td>${c.last_error?`<span class="danger-text">${esc(c.last_error)}</span>`:(c.auto_renew?'<span class="good-text">Automatic</span>':'Manual')}</td><td><div class="inline-actions"><button class="btn small" data-edit-cert="${c.id}">Edit</button>${c.provider.includes('letsencrypt')?`<button class="btn small" data-renew-cert="${c.id}">Renew</button>`:''}<button class="btn small danger" data-delete-cert="${c.id}">Delete</button></div></td></tr>`}).join('')}</tbody></table></div>`; }
 
 async function analytics() {
-  const hostsRaw = await api('/api/v1/hosts');
+  const [hostsRaw, zentLoopRaw] = await Promise.all([api('/api/v1/hosts'), api('/api/v1/integrations/zentloop')]);
   const configuredHosts = arr(hostsRaw);
   const configuredDomains = [...new Set(configuredHosts.flatMap((h) => arr(h.domains)).filter((d) => d && !d.startsWith('*.')))].sort((a,b)=>a.localeCompare(b));
-  let ticking = null;
+  const zentLoopEnabled = !!obj(zentLoopRaw).enabled;
+  if (!zentLoopEnabled) state.analyticsZentLoop = 'all';
+  let draftRange = state.analyticsRange;
+  let draftHost = state.analyticsHost;
+  let draftZentLoop = zentLoopEnabled ? state.analyticsZentLoop : 'all';
+  let refreshing = false;
 
   const query = () => {
     const q = new URLSearchParams({ range: state.analyticsRange });
     if (state.analyticsHost) q.set('host', state.analyticsHost);
+    if (zentLoopEnabled && state.analyticsZentLoop !== 'all') q.set('zentloop', state.analyticsZentLoop);
     return q.toString();
   };
-
-  const draw = async (preserveControls = false) => {
-    const [statsRaw, reqsRaw] = await Promise.all([
-      api(`/api/v1/stats/summary?${query()}`), api(`/api/v1/stats/requests?${query()}&limit=100`),
-    ]);
-    const stats = obj(statsRaw), reqs = arr(reqsRaw);
-    const hostOptions = [...new Set([...configuredDomains, ...arr(stats.top_hosts).map((x)=>x.key).filter(Boolean)])].sort((a,b)=>a.localeCompare(b));
-    const updated = new Date();
-    $('#content').innerHTML = `
-      <div class="analytics-toolbar card">
-        <div class="analytics-controls">
-          <label>Period<select id="analytics-range"><option value="1h" ${state.analyticsRange==='1h'?'selected':''}>1h</option><option value="24h" ${state.analyticsRange==='24h'?'selected':''}>24h</option><option value="7d" ${state.analyticsRange==='7d'?'selected':''}>7d</option><option value="30d" ${state.analyticsRange==='30d'?'selected':''}>30d</option></select></label>
-          <label>Domain<input id="analytics-host" list="analytics-hosts" value="${esc(state.analyticsHost)}" placeholder="All domains"><datalist id="analytics-hosts">${hostOptions.map((h)=>`<option value="${esc(h)}"></option>`).join('')}</datalist></label>
-          <button id="analytics-apply" class="btn" type="button">Apply</button>
-        </div>
-        <div class="analytics-refresh-state">
-          <button id="analytics-auto" class="btn small ${state.analyticsAuto?'active':''}" type="button"><span class="status-dot ${state.analyticsAuto?'ok':'off'}"></span> Auto refresh: <strong>${state.analyticsAuto?'ON':'OFF'}</strong></button>
-          <span id="analytics-refresh-meta" class="muted">Updated ${updated.toLocaleTimeString()}${state.analyticsAuto ? ` · next in ${state.analyticsCountdown}s` : ''}</span>
-        </div>
-      </div>
-      <div class="cards">${metric('requests', 'Requests', fmtNum(stats.requests))}${metric('clients', 'Clients', fmtNum(stats.unique_ips))}${metric('traffic', 'Traffic', fmtBytes(stats.bytes))}${metric('status', 'Avg response', `${num(stats.average_time_ms).toFixed(1)} ms`)}</div>
-      <div class="grid-2 analytics-grid">
-        <div class="card">${sectionHeading('proxy-hosts', 'Top domains')}${domainCountList(arr(stats.top_hosts))}</div>
-        <div class="card">${sectionHeading('ip', 'Top client IPs')}${countList(arr(stats.top_ips))}</div>
-      </div>
-      <div class="grid-2 analytics-grid">
-        <div class="card">${sectionHeading('paths', 'Top paths')}${countList(arr(stats.top_paths))}</div>
-        <div class="card">${sectionHeading('status', 'Status codes')}${statusBars(obj(stats.status_classes), num(stats.requests))}</div>
-      </div>
-      <div class="card">${sectionHeading('requests', 'Recent requests')}${requestTable(reqs)}</div>`;
-
-    $('#analytics-range').onchange = (e) => { state.analyticsRange = e.target.value; };
-    $('#analytics-host').oninput = (e) => { state.analyticsHost = e.target.value.trim(); };
-    $('#analytics-apply').onclick = async () => { state.analyticsCountdown = 5; await draw(); };
-    $$('[data-analytics-domain]').forEach((b) => { b.onclick = async () => { state.analyticsHost = b.dataset.analyticsDomain || ''; state.analyticsCountdown = 5; await draw(); }; });
-    $('#analytics-auto').onclick = () => {
-      state.analyticsAuto = !state.analyticsAuto;
-      state.analyticsCountdown = 5;
-      const b = $('#analytics-auto');
+  const renderRefreshState = () => {
+    const countdown = $('#analytics-countdown');
+    if (countdown) countdown.textContent = state.analyticsAuto ? `${state.analyticsCountdown}s` : '';
+    const b = $('#analytics-auto');
+    if (b) {
       b.classList.toggle('active', state.analyticsAuto);
-      b.innerHTML = `<span class="status-dot ${state.analyticsAuto?'ok':'off'}"></span> Auto refresh: <strong>${state.analyticsAuto?'ON':'OFF'}</strong>`;
-      const m = $('#analytics-refresh-meta');
-      if (m) m.textContent = `Updated ${updated.toLocaleTimeString()}${state.analyticsAuto ? ` · next in ${state.analyticsCountdown}s` : ''}`;
-    };
-    localize($('#content'));
+      b.setAttribute('aria-pressed', state.analyticsAuto ? 'true' : 'false');
+      b.innerHTML = `<span class="status-dot ${state.analyticsAuto?'ok':'off'}"></span><span>${tr('Auto refresh')}</span>`;
+    }
+  };
+  const updateDomainClear = () => {
+    const clear = $('#analytics-host-clear');
+    if (clear) clear.classList.toggle('hidden', !draftHost);
+  };
+  const bindDataActions = (renderData) => {
+    $$('[data-analytics-domain]').forEach((b) => {
+      b.onclick = async () => {
+        state.analyticsHost = b.dataset.analyticsDomain || '';
+        draftHost = state.analyticsHost;
+        const input = $('#analytics-host'); if (input) input.value = draftHost;
+        updateDomainClear(); state.analyticsCountdown = 5; renderRefreshState();
+        await renderData();
+      };
+    });
+  };
+  const renderData = async () => {
+    if (refreshing || state.page !== 'analytics') return;
+    refreshing = true;
+    try {
+      const q = query();
+      const [statsRaw, reqsRaw] = await Promise.all([
+        api(`/api/v1/stats/summary?${q}`), api(`/api/v1/stats/requests?${q}&limit=100`),
+      ]);
+      if (state.page !== 'analytics' || !$('#analytics-data')) return;
+      const stats = obj(statsRaw), reqs = arr(reqsRaw);
+      $('#analytics-data').innerHTML = `
+        <div class="cards">${metric('requests', 'Requests', fmtNum(stats.requests))}${metric('clients', 'Clients', fmtNum(stats.unique_ips))}${metric('traffic', 'Traffic', fmtBytes(stats.bytes))}${metric('status', 'Avg response', `${num(stats.average_time_ms).toFixed(1)} ms`)}</div>
+        <div class="grid-2 analytics-grid">
+          <div class="card">${sectionHeading('proxy-hosts', 'Top domains')}${domainCountList(arr(stats.top_hosts))}</div>
+          <div class="card">${sectionHeading('ip', 'Top client IPs')}${countList(arr(stats.top_ips))}</div>
+        </div>
+        <div class="grid-2 analytics-grid">
+          <div class="card">${sectionHeading('paths', 'Top paths')}${countList(arr(stats.top_paths))}</div>
+          <div class="card">${sectionHeading('status', 'Status codes')}${statusBars(obj(stats.status_classes), num(stats.requests))}</div>
+        </div>
+        <div class="card">${sectionHeading('requests', 'Recent requests')}${requestTable(reqs)}</div>`;
+      localize($('#analytics-data'));
+      bindDataActions(renderData);
+    } finally { refreshing = false; }
   };
 
-  await draw();
+  $('#content').innerHTML = `
+    <div class="analytics-toolbar card">
+      <div class="analytics-controls">
+        <label>Period<select id="analytics-range"><option value="1h" ${draftRange==='1h'?'selected':''}>1h</option><option value="24h" ${draftRange==='24h'?'selected':''}>24h</option><option value="7d" ${draftRange==='7d'?'selected':''}>7d</option><option value="30d" ${draftRange==='30d'?'selected':''}>30d</option></select></label>
+        <label>Domain<div class="input-clear-wrap"><input id="analytics-host" value="${esc(draftHost)}" placeholder="All domains"><button id="analytics-host-clear" class="input-clear ${draftHost?'':'hidden'}" type="button" aria-label="Clear domain filter" title="Clear domain filter">×</button></div></label>
+        ${zentLoopEnabled ? `<label>ZentLoop<select id="analytics-zentloop"><option value="all" ${draftZentLoop==='all'?'selected':''}>All</option><option value="only" ${draftZentLoop==='only'?'selected':''}>Only ZentLoop</option><option value="without" ${draftZentLoop==='without'?'selected':''}>Without ZentLoop</option></select></label>` : ''}
+        <button id="analytics-apply" class="btn" type="button">Apply</button>
+      </div>
+      <div class="analytics-refresh-state"><span id="analytics-countdown" class="analytics-countdown muted"></span><button id="analytics-auto" class="btn small" type="button"></button></div>
+    </div>
+    <div id="analytics-data"></div>`;
+
+  $('#analytics-range').onchange = (e) => { draftRange = e.target.value; };
+  $('#analytics-host').oninput = (e) => { draftHost = e.target.value.trim(); updateDomainClear(); };
+  $('#analytics-host').onkeydown = async (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#analytics-apply').click(); } };
+  if ($('#analytics-zentloop')) $('#analytics-zentloop').onchange = (e) => { draftZentLoop = e.target.value; };
+  $('#analytics-host-clear').onclick = async () => {
+    draftHost = ''; state.analyticsHost = '';
+    $('#analytics-host').value = ''; updateDomainClear(); state.analyticsCountdown = 5; renderRefreshState();
+    await renderData();
+  };
+  $('#analytics-apply').onclick = async () => {
+    state.analyticsRange = draftRange;
+    state.analyticsHost = draftHost;
+    state.analyticsZentLoop = zentLoopEnabled ? draftZentLoop : 'all';
+    state.analyticsCountdown = 5; renderRefreshState();
+    await renderData();
+  };
+  $('#analytics-auto').onclick = () => { state.analyticsAuto = !state.analyticsAuto; state.analyticsCountdown = 5; renderRefreshState(); };
+  localize($('#content')); renderRefreshState(); await renderData();
+
   state.poll = setInterval(async () => {
-    if (state.page !== 'analytics') return;
-    if (!state.analyticsAuto) return;
+    if (state.page !== 'analytics' || !state.analyticsAuto) return;
     state.analyticsCountdown -= 1;
-    const meta = $('#analytics-refresh-meta');
-    if (state.analyticsCountdown > 0) {
-      if (meta) meta.textContent = `${tr('Auto refresh active')} · ${tr('next in')} ${state.analyticsCountdown}s`;
-      return;
-    }
-    state.analyticsCountdown = 5;
-    try { await draw(true); } catch {}
+    if (state.analyticsCountdown > 0) { renderRefreshState(); return; }
+    state.analyticsCountdown = 5; renderRefreshState();
+    try { await renderData(); } catch {}
   }, 1000);
 }
 
 function requestTable(rs) {
   rs = arr(rs);
   if (!rs.length) return '<div class="empty">No requests recorded yet.</div>';
-  return `<div class="table-wrap"><table><thead><tr><th>Time</th><th>Host</th><th>Client IP</th><th>Method</th><th>Path</th><th>Status</th><th>Time</th></tr></thead><tbody>${rs.map((r) => `<tr><td>${new Date(r.at).toLocaleTimeString()}</td><td>${esc(r.host)}</td><td class="code">${esc(r.ip)}</td><td>${esc(r.method)}</td><td class="code">${esc(r.path)}${r.query ? '?' + esc(r.query) : ''}</td><td><span class="pill ${r.status < 400 ? 'good' : r.status >= 500 ? 'warn' : ''}">${num(r.status)}</span></td><td>${num(r.request_time_ms).toFixed(1)} ms</td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>Time</th><th>Host</th><th>Client IP</th><th>Method</th><th>Path</th><th>Status</th><th>Time</th></tr></thead><tbody>${rs.map((r) => `<tr><td>${new Date(r.at).toLocaleTimeString()}</td><td><span class="analytics-host-cell">${esc(r.host)}${r.zentloop ? `<span class="analytics-zentloop-marker" title="Routed through ZentLoop">${icon('zentloop')}</span>` : ''}</span></td><td class="code">${esc(r.ip)}</td><td>${esc(r.method)}</td><td class="code">${esc(r.path)}${r.query ? '?' + esc(r.query) : ''}</td><td><span class="pill ${r.status < 400 ? 'good' : r.status >= 500 ? 'warn' : ''}">${num(r.status)}</span></td><td>${num(r.request_time_ms).toFixed(1)} ms</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 async function providers() {
   const [psRaw, hsRaw] = await Promise.all([loadProviders(), api('/api/v1/hosts')]);
   const ps = arr(psRaw), hs = arr(hsRaw); state.hosts = hs;
-  $('#top-actions').innerHTML = `<button id="add-provider" class="btn primary btn-icon">${icon('plus')}<span>Add provider</span></button>`;
+  $('#top-actions').innerHTML = `<button id="add-provider" class="btn primary btn-icon">${icon('add')}<span>Add provider</span></button>`;
   const usageCount = (id) => hs.filter(h => h.trusted_proxy_provider_id === id).length;
   $('#content').innerHTML = `<div class="card">${sectionHeading('trusted-proxies', 'Trusted proxy providers', '<span class="muted">Define trusted proxy or CDN networks for real client IP detection. A provider only takes effect when selected on a Proxy Host.</span>')}<div class="table-wrap"><table><thead><tr><th>Provider</th><th>Client IP header</th><th>Ranges</th><th>Used by hosts</th><th>Status</th><th></th></tr></thead><tbody>${ps.map((p) => {
     const builtin = p.slug === 'cloudflare' || p.kind !== 'manual';

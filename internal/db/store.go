@@ -220,7 +220,8 @@ CREATE TABLE IF NOT EXISTS raw_requests (
   user_agent TEXT NOT NULL DEFAULT '',
   referer TEXT NOT NULL DEFAULT '',
   http_version TEXT NOT NULL DEFAULT '',
-  tls_version TEXT NOT NULL DEFAULT ''
+  tls_version TEXT NOT NULL DEFAULT '',
+  zentloop INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_raw_requests_at ON raw_requests(at);
 CREATE INDEX IF NOT EXISTS idx_raw_requests_host_at ON raw_requests(host, at);
@@ -253,6 +254,9 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_at ON audit_log(at);
 		return err
 	}
 	if err := s.ensureColumn("certificates", "description", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("raw_requests", "zentloop", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	hadAccessAuthEnabled, err := s.columnExists("access_lists", "auth_enabled")
@@ -1267,11 +1271,11 @@ func rawRequestArgs(r model.RawRequest) []any {
 	if r.UpstreamTimeMS != nil {
 		upstream = *r.UpstreamTimeMS
 	}
-	return []any{r.At.UTC().Format(time.RFC3339Nano), r.Host, r.IP, r.Method, r.Path, r.Query, r.Status, r.Bytes, r.RequestTimeMS, upstream, r.UserAgent, r.Referer, r.HTTPVersion, r.TLSVersion}
+	return []any{r.At.UTC().Format(time.RFC3339Nano), r.Host, r.IP, r.Method, r.Path, r.Query, r.Status, r.Bytes, r.RequestTimeMS, upstream, r.UserAgent, r.Referer, r.HTTPVersion, r.TLSVersion, r.ZentLoop}
 }
 
 func (s *Store) InsertRawRequest(r model.RawRequest) error {
-	_, err := s.db.Exec(`INSERT INTO raw_requests(at,host,ip,method,path,query,status,bytes,request_time_ms,upstream_time_ms,user_agent,referer,http_version,tls_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, rawRequestArgs(r)...)
+	_, err := s.db.Exec(`INSERT INTO raw_requests(at,host,ip,method,path,query,status,bytes,request_time_ms,upstream_time_ms,user_agent,referer,http_version,tls_version,zentloop) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, rawRequestArgs(r)...)
 	return err
 }
 
@@ -1295,7 +1299,7 @@ func (s *Store) InsertRawRequestWithOffset(name string, offset int64, r model.Ra
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`INSERT INTO raw_requests(at,host,ip,method,path,query,status,bytes,request_time_ms,upstream_time_ms,user_agent,referer,http_version,tls_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, rawRequestArgs(r)...); err != nil {
+	if _, err := tx.Exec(`INSERT INTO raw_requests(at,host,ip,method,path,query,status,bytes,request_time_ms,upstream_time_ms,user_agent,referer,http_version,tls_version,zentloop) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, rawRequestArgs(r)...); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`INSERT INTO analytics_state(name,offset,updated_at) VALUES(?,?,?) ON CONFLICT(name) DO UPDATE SET offset=excluded.offset,updated_at=excluded.updated_at`, name, offset, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
@@ -1310,15 +1314,20 @@ func (s *Store) CleanupRawRequests(retentionDays int) error {
 	return err
 }
 
-func (s *Store) RecentRequests(since time.Time, host string, limit int) ([]model.RawRequest, error) {
+func (s *Store) RecentRequests(since time.Time, host, zentloop string, limit int) ([]model.RawRequest, error) {
 	if limit < 1 || limit > 1000 {
 		limit = 200
 	}
-	query := `SELECT id,at,host,ip,method,path,query,status,bytes,request_time_ms,upstream_time_ms,user_agent,referer,http_version,tls_version FROM raw_requests WHERE at>=?`
+	query := `SELECT id,at,host,ip,method,path,query,status,bytes,request_time_ms,upstream_time_ms,user_agent,referer,http_version,tls_version,zentloop FROM raw_requests WHERE at>=?`
 	args := []any{since.UTC().Format(time.RFC3339Nano)}
 	if host != "" {
 		query += " AND host=?"
 		args = append(args, host)
+	}
+	if zentloop == "only" {
+		query += " AND zentloop=1"
+	} else if zentloop == "without" {
+		query += " AND zentloop=0"
 	}
 	query += " ORDER BY id DESC LIMIT ?"
 	args = append(args, limit)
@@ -1332,7 +1341,7 @@ func (s *Store) RecentRequests(since time.Time, host string, limit int) ([]model
 		var r model.RawRequest
 		var at string
 		var up sql.NullFloat64
-		if err := rows.Scan(&r.ID, &at, &r.Host, &r.IP, &r.Method, &r.Path, &r.Query, &r.Status, &r.Bytes, &r.RequestTimeMS, &up, &r.UserAgent, &r.Referer, &r.HTTPVersion, &r.TLSVersion); err != nil {
+		if err := rows.Scan(&r.ID, &at, &r.Host, &r.IP, &r.Method, &r.Path, &r.Query, &r.Status, &r.Bytes, &r.RequestTimeMS, &up, &r.UserAgent, &r.Referer, &r.HTTPVersion, &r.TLSVersion, &r.ZentLoop); err != nil {
 			return nil, err
 		}
 		r.At, _ = time.Parse(time.RFC3339Nano, at)
@@ -1345,13 +1354,18 @@ func (s *Store) RecentRequests(since time.Time, host string, limit int) ([]model
 	return out, rows.Err()
 }
 
-func (s *Store) StatsSummary(since time.Time, host string) (model.StatsSummary, error) {
+func (s *Store) StatsSummary(since time.Time, host, zentloop string) (model.StatsSummary, error) {
 	out := model.StatsSummary{Since: since.UTC(), StatusClasses: map[string]int64{"2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0}, TopHosts: []model.CountItem{}, TopPaths: []model.CountItem{}, TopIPs: []model.CountItem{}}
 	where := "at>=?"
 	args := []any{since.UTC().Format(time.RFC3339Nano)}
 	if host != "" {
 		where += " AND host=?"
 		args = append(args, host)
+	}
+	if zentloop == "only" {
+		where += " AND zentloop=1"
+	} else if zentloop == "without" {
+		where += " AND zentloop=0"
 	}
 	q := `SELECT COUNT(*),COUNT(DISTINCT ip),COALESCE(SUM(bytes),0),COALESCE(SUM(CASE WHEN status>=400 THEN 1 ELSE 0 END),0),COALESCE(AVG(request_time_ms),0),
 	COALESCE(SUM(CASE WHEN status BETWEEN 200 AND 299 THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status BETWEEN 300 AND 399 THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status BETWEEN 400 AND 499 THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status>=500 THEN 1 ELSE 0 END),0) FROM raw_requests WHERE ` + where

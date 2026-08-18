@@ -460,8 +460,8 @@ __ZP_CLOUDFLARE_HOSTS__    }
     map $zp_client_ip $zp_analytics_ip {
 __ZP_ANALYTICS_IP_MAP__    }
 
-    log_format zentproxy_json escape=json '{"ts":"$time_iso8601","host":"$host","ip":"$zp_analytics_ip","method":"$request_method","path":"$uri","query":"","status":$status,"bytes":$body_bytes_sent,"request_time":"$request_time","upstream_time":"$upstream_response_time","user_agent":"$http_user_agent","referer":"$http_referer","http_version":"$server_protocol","tls_version":"$ssl_protocol"}';
-    log_format zentproxy_json_query escape=json '{"ts":"$time_iso8601","host":"$host","ip":"$zp_analytics_ip","method":"$request_method","path":"$uri","query":"$args","status":$status,"bytes":$body_bytes_sent,"request_time":"$request_time","upstream_time":"$upstream_response_time","user_agent":"$http_user_agent","referer":"$http_referer","http_version":"$server_protocol","tls_version":"$ssl_protocol"}';
+    log_format zentproxy_json escape=json '{"ts":"$time_iso8601","host":"$host","ip":"$zp_analytics_ip","method":"$request_method","path":"$uri","query":"","status":$status,"bytes":$body_bytes_sent,"request_time":"$request_time","upstream_time":"$upstream_response_time","user_agent":"$http_user_agent","referer":"$http_referer","http_version":"$server_protocol","tls_version":"$ssl_protocol","upstream_addr":"$upstream_addr"}';
+    log_format zentproxy_json_query escape=json '{"ts":"$time_iso8601","host":"$host","ip":"$zp_analytics_ip","method":"$request_method","path":"$uri","query":"$args","status":$status,"bytes":$body_bytes_sent,"request_time":"$request_time","upstream_time":"$upstream_response_time","user_agent":"$http_user_agent","referer":"$http_referer","http_version":"$server_protocol","tls_version":"$ssl_protocol","upstream_addr":"$upstream_addr"}';
 
     access_log off;
 

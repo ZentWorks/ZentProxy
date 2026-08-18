@@ -206,6 +206,7 @@ type logLine struct {
 	Referer      string `json:"referer"`
 	HTTPVersion  string `json:"http_version"`
 	TLSVersion   string `json:"tls_version"`
+	UpstreamAddr string `json:"upstream_addr"`
 }
 
 func (t *Tailer) ingest(line string, nextOffset int64) error {
@@ -227,8 +228,17 @@ func (t *Tailer) ingest(line string, nextOffset int64) error {
 		ms := v * 1000
 		up = &ms
 	}
-	r := model.RawRequest{At: at, Host: l.Host, IP: l.IP, Method: l.Method, Path: l.Path, Query: l.Query, Status: l.Status, Bytes: l.Bytes, RequestTimeMS: rt, UpstreamTimeMS: up, UserAgent: l.UserAgent, Referer: l.Referer, HTTPVersion: l.HTTPVersion, TLSVersion: l.TLSVersion}
+	r := model.RawRequest{At: at, Host: l.Host, IP: l.IP, Method: l.Method, Path: l.Path, Query: l.Query, Status: l.Status, Bytes: l.Bytes, RequestTimeMS: rt, UpstreamTimeMS: up, UserAgent: l.UserAgent, Referer: l.Referer, HTTPVersion: l.HTTPVersion, TLSVersion: l.TLSVersion, ZentLoop: usesZentLoop(l.UpstreamAddr)}
 	return t.store.InsertRawRequestWithOffset(analyticsCheckpoint, nextOffset, r)
+}
+
+func usesZentLoop(v string) bool {
+	for _, part := range strings.Split(v, ",") {
+		if strings.TrimSpace(part) == "127.0.0.1:18081" {
+			return true
+		}
+	}
+	return false
 }
 
 func firstFloat(v string) float64 {

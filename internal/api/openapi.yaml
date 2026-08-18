@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: ZentProxy API
-  version: 0.7.9
+  version: 0.7.10
   description: Versioned API for ZentProxy proxy management, certificates, routing, analytics, trusted proxies, integrations, user preferences and migration tooling.
 servers:
   - url: /api/v1
@@ -515,11 +515,29 @@ paths:
         - in: query
           name: host
           schema: { type: string }
+        - in: query
+          name: zentloop
+          description: Filter analytics by requests routed through ZentLoop.
+          schema: { type: string, enum: [only, without] }
       responses: { '200': { description: OK } }
   /stats/requests:
     get:
       tags: [Analytics]
       summary: Get recent requests
+      parameters:
+        - in: query
+          name: range
+          schema: { type: string, enum: [1h, 24h, 7d, 30d], default: 24h }
+        - in: query
+          name: host
+          schema: { type: string }
+        - in: query
+          name: zentloop
+          description: Filter analytics by requests routed through ZentLoop.
+          schema: { type: string, enum: [only, without] }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
       responses: { '200': { description: OK } }
   /trusted-proxy-providers:
     get:
