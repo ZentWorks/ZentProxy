@@ -1,89 +1,109 @@
 (() => {
-  const de = {
-    'Sign in to your proxy control plane.':'Melde dich an, um ZentProxy zu verwalten.',
-    'Username':'Benutzername','E-mail':'E-Mail','Password':'Passwort','Sign in':'Anmelden','Sign out':'Abmelden',
-    'Overview':'Übersicht','Proxy Hosts':'Proxy Hosts','Certificates':'Zertifikate','Routing & Access':'Routing & Zugriff','Routing':'Routing','Access Lists':'Zugriffslisten',
-    'Analytics':'Statistiken','Trusted Proxies':'Vertrauenswürdige Proxys','Migration':'Migration','Developer API':'Entwickler-API','Audit Log':'Audit-Protokoll','Documentation':'Dokumentation',
-    'Traffic, health and the things that matter.':'Traffic, Zustand und die wichtigsten Kennzahlen.',
-    'Domains and upstreams without config-file archaeology.':'Domains und Ziele ohne Konfigurationsdatei-Suche.',
-    "Let's Encrypt, automatic renewal and imported certificates.":'Let’s Encrypt, automatische Erneuerung und importierte Zertifikate.',
-    'Redirects, 404 hosts, TCP/UDP streams and access lists.':'Weiterleitungen, 404-Hosts, TCP/UDP-Streams und Zugriffslisten.','Redirects, 404 hosts and TCP/UDP streams.':'Weiterleitungen, 404-Hosts und TCP/UDP-Streams.','Reusable IP rules and authentication policies for proxy hosts.':'Wiederverwendbare IP-Regeln und Zugriffsrichtlinien für Proxy Hosts.',
-    'Per-host traffic down to paths and client IPs.':'Traffic pro Host bis hin zu Pfaden und Client-IPs.',
-    'Real client IP handling with maintained provider ranges.':'Echte Client-IP mit automatisch gepflegten Provider-Netzen.','Real client IP handling with built-in and custom trusted proxy providers.':'Echte Client-IP mit integrierten und eigenen Trusted-Proxy-Providern.',
-    'Trusted proxy providers':'Trusted-Proxy-Provider','Define trusted proxy or CDN networks for real client IP detection. A provider only takes effect when selected on a Proxy Host.':'Vertrauenswürdige Proxy- oder CDN-Netze für die Ermittlung der echten Client-IP verwalten. Ein Provider wird nur verwendet, wenn er bei einem Proxy Host ausgewählt ist.','Add provider':'Provider hinzufügen','Provider':'Provider','Client IP header':'Client-IP-Header','Ranges':'Netze','Used by hosts':'Von Hosts verwendet','Status':'Status','Built-in provider':'Integrierter Provider','Custom provider':'Eigener Provider','Automatically maintained':'Automatisch gepflegt','Manual':'Manuell','Refresh':'Aktualisieren','Edit':'Bearbeiten','Delete':'Löschen','Edit trusted proxy provider':'Trusted-Proxy-Provider bearbeiten','Add trusted proxy provider':'Trusted-Proxy-Provider hinzufügen','Name':'Name','Trusted IP addresses / CIDRs':'Vertrauenswürdige IP-Adressen / CIDRs','The header that contains the original client IP after traffic passed through this provider.':'Der Header, der nach dem Durchlaufen dieses Providers die ursprüngliche Client-IP enthält.','One IPv4/IPv6 address or CIDR per line. Individual addresses are normalized to /32 or /128.':'Eine IPv4-/IPv6-Adresse oder ein CIDR pro Zeile. Einzelne Adressen werden auf /32 bzw. /128 normalisiert.','Providers are inactive by default. Select this provider explicitly on the Proxy Hosts that should trust it.':'Provider sind standardmäßig inaktiv. Wähle den Provider gezielt bei den Proxy Hosts aus, die ihm vertrauen sollen.','Save changes':'Änderungen speichern','Provider ranges refreshed':'Provider-Netze aktualisiert','Provider updated':'Provider aktualisiert','Provider created':'Provider erstellt','Provider deleted':'Provider gelöscht','host(s) reset to Direct / None':'Host(s) auf Direct / None zurückgesetzt','Proxy Host(s) will automatically switch to Direct / None.':'Proxy Host(s) werden automatisch auf Direct / None umgestellt.',
-    'Route unmatched hosts into the deception backend.':'Nicht zugeordnete Hosts an ZentLoop weiterleiten.',
-    'Analyze first, then move the full supported configuration into ZentProxy.':'Erst analysieren, dann die unterstützte Konfiguration vollständig nach ZentProxy übernehmen.',
-    'Scoped API keys and a stable versioned interface.':'API-Schlüssel mit Berechtigungen und stabiler, versionierter Schnittstelle.',
-    'Who changed what and when.':'Wer was wann geändert hat.',
-    'Search and read the ZentProxy documentation without leaving the WebUI.':'ZentProxy-Dokumentation durchsuchen und direkt in der WebUI lesen.',
-    'Loading…':'Laden…','Proxy hosts':'Proxy Hosts','Requests · 24h':'Anfragen · 24h','Unique IPs · 24h':'Eindeutige IPs · 24h','Traffic · 24h':'Traffic · 24h',
-    'Top hosts':'Top Hosts','Top domains':'Top Domains','Status codes':'Statuscodes','Top paths':'Top Pfade','Top client IPs':'Top Client-IPs','No traffic yet.':'Noch kein Traffic.','Period':'Zeitraum','Domain':'Domain','All domains':'Alle Domains','Apply':'Anwenden','Auto refresh:':'Auto-Aktualisierung:','ON':'AN','OFF':'AUS','Auto refresh active':'Auto-Aktualisierung aktiv','next in':'nächste in','Updated':'Aktualisiert','Traffic':'Traffic','Clients':'Clients','Requests':'Anfragen',
-    'Search name, domain or target…':'Name, Domain oder Ziel suchen…','List':'Liste','Grouped by domain':'Nach Domain gruppiert','View':'Ansicht','IP addresses':'IP-Adressen','Other':'Sonstige','No proxy hosts match your search.':'Keine Proxy Hosts entsprechen der Suche.','Add host':'Host hinzufügen','No proxy hosts yet. Add the first one or use Migration.':'Noch keine Proxy Hosts. Füge den ersten hinzu oder nutze die Migration.',
-    'Status':'Status','Name':'Name','Domains':'Domains','Upstream':'Ziel','TLS':'TLS','Trusted proxy':'Vertrauenswürdiger Proxy','Access':'Zugriff','Online':'Online','Disabled':'Deaktiviert','On':'An','Off':'Aus','Direct':'Direkt','Public':'Öffentlich',
-    'Add proxy host':'Proxy Host hinzufügen','Edit proxy host':'Proxy Host bearbeiten','Simple by default. The useful switches are right here.':'Standardmäßig einfach. Die wichtigen Optionen sind direkt verfügbar.',
-    'One domain per line.':'Eine Domain oder IP pro Zeile.','Type a domain or IP and press Enter. Paste multiple values at once if you want.':'Domain oder IP eingeben und Enter drücken. Mehrere Werte können auf einmal eingefügt werden.','Scheme':'Schema','Forward host':'Zielhost','Forward port':'Zielport','TLS certificate':'TLS-Zertifikat','Create with Let\'s Encrypt':'Mit Let’s Encrypt erstellen','Let\'s Encrypt e-mail':'Let’s-Encrypt-E-Mail','Defaults to the ZentProxy administrator e-mail and can be overridden here.':'Standardmäßig wird die ZentProxy-Admin-E-Mail verwendet; hier kann sie überschrieben werden.','Access list':'Zugriffsliste',
-    'Advanced OpenResty configuration':'Erweiterte OpenResty-Konfiguration','Imported advanced directives are preserved here. Use only if you know the OpenResty syntax.':'Importierte erweiterte Direktiven bleiben hier erhalten. Nur verwenden, wenn du die OpenResty-Syntax kennst.',
-    'Enabled':'Aktiviert','Serve this host.':'Diesen Host bereitstellen.','WebSockets':'WebSockets','Upgrade connections automatically.':'Verbindungen automatisch upgraden.','Preserve Host':'Host beibehalten','Forward the original hostname.':'Originalen Hostnamen weiterleiten.',
-    'Store request statistics for this host.':'Anfragestatistiken für diesen Host speichern.','Store query string':'Query-String speichern','Off by default because URLs can contain secrets.':'Standardmäßig aus, da URLs sensible Daten enthalten können.',
-    'Common exploit filter':'Filter für häufige Exploits','Drop a small set of high-signal paths/files.':'Eine kleine Auswahl eindeutig verdächtiger Pfade/Dateien blockieren.','Force HTTPS':'HTTPS erzwingen','Redirect HTTP to HTTPS when a certificate is selected.':'HTTP auf HTTPS umleiten, wenn ein Zertifikat gewählt ist.',
-    'Enable HTTP/2 on TLS.':'HTTP/2 bei TLS aktivieren.','HSTS':'HSTS','Send Strict-Transport-Security on HTTPS.':'Strict-Transport-Security über HTTPS senden.','HSTS subdomains':'HSTS für Subdomains','Include subdomains in HSTS.':'Subdomains in HSTS einschließen.',
-    'Proxy cache':'Proxy-Cache','Enable the lightweight shared cache.':'Leichtgewichtigen gemeinsamen Cache aktivieren.','Trust forwarded proto':'Forwarded-Proto vertrauen','Preserve an upstream X-Forwarded-Proto value.':'Vorhandenen X-Forwarded-Proto-Wert übernehmen.',
-    'Cancel':'Abbrechen','Delete':'Löschen','Save host':'Host speichern','API token created':'API-Token erstellt','Copy it now. ZentProxy stores only its hash and cannot show it again.':'Jetzt kopieren. ZentProxy speichert nur den Hash und kann den Token später nicht erneut anzeigen.','Copy token':'Token kopieren',
-    'Create API key':'API-Schlüssel erstellen','Create key':'Schlüssel erstellen','Integration contract':'Integrationsschnittstelle','Open interactive API documentation':'Interaktive API-Dokumentation öffnen','View raw OpenAPI specification':'Rohe OpenAPI-Spezifikation anzeigen','Base path':'Basispfad','Authentication':'Authentifizierung','Format':'Format','API keys':'API-Schlüssel','No API keys yet.':'Noch keine API-Schlüssel.','Last used':'Zuletzt verwendet','Never':'Nie','Active':'Aktiv','Revoked':'Widerrufen','Revoke':'Widerrufen',
-    'Migration completed':'Migration abgeschlossen','Analyze installation':'Installation analysieren','Analysis':'Analyse','Read only':'Nur lesen','Certificate migration':'Zertifikatsmigration','Reissue after migration':'Nach Migration neu ausstellen','Ready':'Bereit','Blocked':'Blockiert','Select ready':'Bereite auswählen','Import migration':'Migration importieren','Compatibility':'Kompatibilität','No domain':'Keine Domain',
-    'Time':'Zeit','Actor':'Akteur','Action':'Aktion','Object':'Objekt','Detail':'Details','No audit events yet.':'Noch keine Audit-Ereignisse.',
-    'Language':'Sprache','German':'Deutsch','English':'Englisch','Search documentation…':'Dokumentation durchsuchen…','No documentation found.':'Keine passende Dokumentation gefunden.','Back to documentation':'Zurück zur Dokumentation',
-    'Getting Started':'Erste Schritte','Proxy Hosts & Routing':'Proxy Hosts & Routing','SSL & Certificates':'SSL & Zertifikate','Let’s Encrypt':'Let’s Encrypt','Trusted Proxies & Cloudflare':'Trusted Proxies & Cloudflare','Access Lists & Streams':'Zugriffslisten & Streams','ZentLoop Integration':'ZentLoop-Integration','Developer API & Integrations':'Entwickler-API & Integrationen','Troubleshooting':'Fehlerbehebung',
-    'Documentation search':'Dokumentationssuche','All topics':'Alle Themen','Open article':'Artikel öffnen','Updated with this ZentProxy version.':'Passend zu dieser ZentProxy-Version.',
-    'Language saved':'Sprache gespeichert','Token copied':'Token kopiert','API key revoked':'API-Schlüssel widerrufen','Authentication required':'Anmeldung erforderlich',
-    'Account e-mail':'Account-E-Mail','Activation failure':'Aktivierungsfehler','Allow self-signed TLS certificate':'Selbstsigniertes TLS-Zertifikat erlauben','Analyze first':'Zuerst analysieren','Auto refresh':'Automatisch aktualisieren','All':'Alle','Only ZentLoop':'Nur ZentLoop','Without ZentLoop':'Ohne ZentLoop','Clear domain filter':'Domainfilter löschen','Routed through ZentLoop':'Über ZentLoop weitergeleitet','Auto renew':'Automatisch erneuern','Automatic renewal':'Automatische Erneuerung','Automatic rollback':'Automatischer Rollback','Avg response':'Ø Antwortzeit',
-    'Certificate / full chain':'Zertifikat / Full Chain','Client IP':'Client-IP','Client IP header':'Client-IP-Header','Connect to running installation':'Mit laufender Installation verbinden','Credentials stored':'Zugangsdaten gespeichert','DNS credential variables':'DNS-Zugangsdatenvariablen','E-mail / identity':'E-Mail / Identität','Enable catch-all routing':'Catch-All-Routing aktivieren','Enable ZentLoop routing':'ZentLoop-Routing aktivieren','Forward unknown/fake hosts to ZentLoop':'Unknown/Fake Hosts an ZentLoop weiterleiten','Known root domains are detected automatically from configured Proxy Hosts. With this disabled, hostnames outside those domains are rejected instead of reaching ZentLoop.':'Bekannte Root-Domains werden automatisch aus den konfigurierten Proxy Hosts erkannt. Ist diese Option deaktiviert, werden Hostnamen außerhalb dieser Domains verworfen und nicht an ZentLoop weitergeleitet.','IP / CIDR lists':'IP-/CIDR-Listen','List name':'Listenname','IP addresses / CIDRs':'IP-Adressen / CIDRs','Add list':'Liste hinzufügen','Remove list':'Liste entfernen','Routing rules':'Routing-Regeln','Add rule':'Regel hinzufügen','Match':'Bedingung','Value':'Wert','Action':'Aktion','Proxy host':'Proxy Host','All hosts':'Alle Hosts','Source IP in list':'Quell-IP in Liste','Path equals':'Pfad ist gleich','Path starts with':'Pfad beginnt mit','Block 403':'Mit 403 blockieren','Existing ZentProxy hosts':'Vorhandene ZentProxy-Hosts','Final activation':'Abschließende Aktivierung',
-    'HTTP and HTTPS requests for unknown hostnames are sent to ZentLoop.':'HTTP- und HTTPS-Anfragen für unbekannte Hostnamen werden an ZentLoop gesendet.','HTTP routing':'HTTP-Routing','HTTP-01 by default, DNS-01 for wildcards and DNS automation.':'Standardmäßig HTTP-01, DNS-01 für Wildcards und DNS-Automatisierung.','ZentLoop integration':'ZentLoop-Integration','Import certificate':'Zertifikat importieren','Migration rules':'Migrationsregeln','No access lists.':'Keine Zugriffslisten.','No certificates yet.':'Noch keine Zertifikate.','No redirect or 404 hosts.':'Keine Redirect- oder 404-Hosts.','No requests recorded yet.':'Noch keine Requests aufgezeichnet.','No streams.':'Keine Streams.',
-    'Only enable this for a source you control on a trusted network.':'Nur für eine Quelle aktivieren, die du in einem vertrauenswürdigen Netz selbst kontrollierst.','Open Proxy Hosts':'Proxy Hosts öffnen','Provider ranges are used only when selected on a host.':'Provider-Netze werden nur verwendet, wenn sie an einem Host ausgewählt sind.','Recent requests':'Letzte Requests','Redirect hosts':'Redirect Hosts','Request certificate':'Zertifikat anfordern','Save integration':'Integration speichern','Shared signing secret':'Gemeinsames Signatur-Secret','Source changes':'Änderungen an der Quelle','Source type':'Quelltyp','The source is read only. Nothing is changed there.':'Die Quelle wird nur gelesen. Dort wird nichts verändert.','Trusted proxy providers':'Trusted-Proxy-Provider',
-    'Unknown hosts only. Normal upstream failures are never diverted.':'Nur unbekannte Hosts. Normale Upstream-Fehler werden niemals umgeleitet.','Upstream URL':'Upstream-URL','Use the admin URL. ZentProxy automatically adds':'Verwende die Admin-URL. ZentProxy ergänzt automatisch','Validated configuration':'Validierte Konfiguration','When set, ZentProxy signs integration metadata with HMAC-SHA256.':'Wenn gesetzt, signiert ZentProxy Integrationsmetadaten mit HMAC-SHA256.','ZentProxy checks certificate lifetime automatically.':'ZentProxy prüft die Zertifikatslaufzeit automatisch.','lego DNS provider':'lego DNS-Provider','404 hosts':'404-Hosts','Access lists':'Zugriffslisten','Redirect hosts':'Redirect Hosts','Streams':'Streams','Certificates':'Zertifikate','Users':'Benutzer','General':'Allgemein','SSL':'SSL','Advanced':'Erweitert','Description':'Beschreibung','Edit':'Bearbeiten','Save':'Speichern','Add redirect':'Weiterleitung hinzufügen','Add 404 host':'404-Host hinzufügen','Add stream':'Stream hinzufügen','Add access list':'Zugriffsliste hinzufügen','Edit access list':'Zugriffsliste bearbeiten','Edit certificate':'Zertifikat bearbeiten','Satisfy any':'Beliebige Regel erfüllt','Pass auth header':'Auth-Header weitergeben','Preserve path':'Pfad beibehalten','Incoming port':'Eingangsport','Target domain':'Zieldomain','Target scheme':'Zielschema','HTTP code':'HTTP-Code','IP / CIDR rules':'IP-/CIDR-Regeln','Observability':'Beobachtung','Security':'Sicherheit','System':'System','Proxy':'Proxy','IP access':'IP-Zugriff','Maintain allow and deny networks separately. One IP or CIDR per line.':'Erlaubte und gesperrte Netze getrennt verwalten. Eine IP oder ein CIDR pro Zeile.','Allow list':'Allow-Liste','Deny list':'Deny-Liste','Login credentials':'Zugangsdaten','Optionally require a username and password. Passwords are stored as bcrypt hashes in the managed access file.':'Optional Benutzername und Passwort verlangen. Passwörter werden als bcrypt-Hashes in der verwalteten Zugangsdatei gespeichert.','Require username and password':'Benutzername und Passwort verlangen','Can be used alone or together with IP rules.':'Kann alleine oder zusammen mit IP-Regeln verwendet werden.','Username':'Benutzername','Password':'Passwort','Add credential':'Zugangsdaten hinzufügen','When IP rules and login are both used':'Wenn IP-Regeln und Login gemeinsam verwendet werden','Both required':'Beides erforderlich','The client must satisfy the IP rules and provide valid credentials.':'Der Client muss die IP-Regeln erfüllen und gültige Zugangsdaten senden.','Either is enough':'Eines reicht aus','Allow when the IP rules or valid credentials match.':'Zugriff erlauben, wenn die IP-Regeln oder gültige Zugangsdaten passen.','Forward Authorization header':'Authorization-Header weiterleiten','Pass the client\'s Authorization header to the upstream application.':'Authorization-Header des Clients an die Upstream-Anwendung weitergeben.','New credential':'Neue Zugangsdaten','Remove':'Entfernen','Login required':'Login erforderlich','Proxy':'Proxy'
-  };
-  const dict = { en: {}, de };
-  let lang = localStorage.getItem('zentproxy.language') || ((navigator.language || '').toLowerCase().startsWith('de') ? 'de' : 'en');
-  if (!dict[lang]) lang = 'en';
+  const supported = Object.freeze({
+    en: { label: 'English' },
+    de: { label: 'Deutsch' },
+    fr: { label: 'Français' },
+    nl: { label: 'Nederlands' },
+    es: { label: 'Español' },
+  });
+  const dictionaries = { en: Object.create(null) };
+  const docs = { en: Object.create(null) };
+  const pending = new Map();
   const textSources = new WeakMap();
   const attrSources = new WeakMap();
-  const t = (s) => dict[lang][s] || s;
-  function setLanguage(next) {
-    lang = dict[next] ? next : 'en';
-    localStorage.setItem('zentproxy.language', lang);
-    document.documentElement.lang = lang;
-    apply(document);
+
+  const normalizeLanguage = (value) => {
+    const code = String(value || '').toLowerCase().split(/[-_]/)[0];
+    return supported[code] ? code : 'en';
+  };
+  let lang = normalizeLanguage(localStorage.getItem('zentproxy.language') || navigator.language || 'en');
+
+  function register(code, dictionary, localizedDocs = null) {
+    code = normalizeLanguage(code);
+    if (code === 'en') return;
+    dictionaries[code] = Object.freeze({ ...(dictionary || {}) });
+    if (localizedDocs) docs[code] = Object.freeze({ ...localizedDocs });
   }
+
+  function load(code) {
+    code = normalizeLanguage(code);
+    if (code === 'en' || dictionaries[code]) return Promise.resolve();
+    if (pending.has(code)) return pending.get(code);
+    const promise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = `/lang/${code}.js`;
+      script.async = true;
+      script.onload = () => dictionaries[code] ? resolve() : reject(new Error(`Language pack ${code} did not register`));
+      script.onerror = () => reject(new Error(`Could not load language pack ${code}`));
+      document.head.appendChild(script);
+    }).catch((err) => {
+      console.warn(err);
+      if (lang === code) lang = 'en';
+    }).finally(() => pending.delete(code));
+    pending.set(code, promise);
+    return promise;
+  }
+
+  const t = (source) => dictionaries[lang]?.[source] || source;
+
   function translateTextNode(node) {
     if (!node.nodeValue || !node.nodeValue.trim()) return;
     if (!textSources.has(node)) textSources.set(node, node.nodeValue);
     const raw = textSources.get(node);
     const trimmed = raw.trim();
-    const translated = t(trimmed);
-    node.nodeValue = raw.replace(trimmed, translated);
+    node.nodeValue = raw.replace(trimmed, t(trimmed));
   }
-  function apply(root=document) {
+
+  function apply(root = document) {
     document.documentElement.lang = lang;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode(n) { return n.parentElement && !['SCRIPT','STYLE','PRE','CODE'].includes(n.parentElement.tagName) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT; }
+      acceptNode(n) {
+        return n.parentElement && !['SCRIPT', 'STYLE', 'PRE', 'CODE'].includes(n.parentElement.tagName)
+          ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      },
     });
-    const nodes=[]; while (walker.nextNode()) nodes.push(walker.currentNode); nodes.forEach(translateTextNode);
-    root.querySelectorAll?.('[placeholder],[title]').forEach(el => {
-      if (!attrSources.has(el)) attrSources.set(el, {placeholder:el.getAttribute('placeholder'), title:el.getAttribute('title')});
-      const src=attrSources.get(el);
-      if(src.placeholder!==null) el.setAttribute('placeholder', t(src.placeholder));
-      if(src.title!==null) el.setAttribute('title', t(src.title));
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(translateTextNode);
+    root.querySelectorAll?.('[placeholder],[title],[aria-label]').forEach((el) => {
+      if (!attrSources.has(el)) attrSources.set(el, {
+        placeholder: el.getAttribute('placeholder'),
+        title: el.getAttribute('title'),
+        ariaLabel: el.getAttribute('aria-label'),
+      });
+      const src = attrSources.get(el);
+      if (src.placeholder !== null) el.setAttribute('placeholder', t(src.placeholder));
+      if (src.title !== null) el.setAttribute('title', t(src.title));
+      if (src.ariaLabel !== null) el.setAttribute('aria-label', t(src.ariaLabel));
     });
-    const ls=document.querySelector('#language-select'); if(ls) ls.value=lang;
-    const lls=document.querySelector('#login-language'); if(lls) lls.value=lang;
+    const ls = document.querySelector('#language-select'); if (ls) ls.value = lang;
+    const lls = document.querySelector('#login-language'); if (lls) lls.value = lang;
   }
-  window.ZentI18n = { t, apply, setLanguage, get language(){return lang;} };
-  document.addEventListener('DOMContentLoaded', () => {
+
+  async function setLanguage(next) {
+    const requested = normalizeLanguage(next);
+    await load(requested);
+    lang = dictionaries[requested] || requested === 'en' ? requested : 'en';
+    localStorage.setItem('zentproxy.language', lang);
+    apply(document);
+    return lang;
+  }
+
+  const ready = load(lang).then(() => {
+    if (!dictionaries[lang] && lang !== 'en') lang = 'en';
+    document.documentElement.lang = lang;
+  });
+
+  window.ZentI18n = { t, apply, setLanguage, register, supported, ready, getDocs(code = lang) { return docs[normalizeLanguage(code)] || null; }, get language() { return lang; } };
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    await ready;
     apply(document);
     new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
           if (node.nodeType === Node.ELEMENT_NODE) apply(node);
+          else if (node.nodeType === Node.TEXT_NODE) translateTextNode(node);
         }
       }
     }).observe(document.body, { childList: true, subtree: true });

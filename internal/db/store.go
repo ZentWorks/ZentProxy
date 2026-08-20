@@ -470,10 +470,12 @@ func (s *Store) UserLanguage(userID int64) string {
 	var language string
 	_ = s.db.QueryRow(`SELECT language FROM users WHERE id=?`, userID).Scan(&language)
 	language = strings.ToLower(strings.TrimSpace(language))
-	if language != "de" && language != "en" {
+	switch language {
+	case "de", "en", "fr", "nl", "es":
+		return language
+	default:
 		return "en"
 	}
-	return language
 }
 
 func (s *Store) UserProxyHostsView(userID int64) string {
@@ -507,7 +509,9 @@ func (s *Store) SetUserProxyHostsView(userID int64, view string) error {
 
 func (s *Store) SetUserLanguage(userID int64, language string) error {
 	language = strings.ToLower(strings.TrimSpace(language))
-	if language != "de" && language != "en" {
+	switch language {
+	case "de", "en", "fr", "nl", "es":
+	default:
 		return fmt.Errorf("unsupported language")
 	}
 	res, err := s.db.Exec(`UPDATE users SET language=? WHERE id=?`, language, userID)

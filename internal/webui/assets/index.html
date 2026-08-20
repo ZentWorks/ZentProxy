@@ -18,7 +18,7 @@
   <form id="login-form" class="login-card">
     <div class="brand brand-large"><img class="brand-mark" src="/zentproxy-mark.png" alt="" aria-hidden="true"><span>ZentProxy</span></div>
     <p class="muted">Sign in to your proxy control plane.</p>
-    <label>Language<select id="login-language"><option value="de">Deutsch</option><option value="en">English</option></select></label>
+    <label>Language<select id="login-language"><option value="de">Deutsch</option><option value="en">English</option><option value="fr">Français</option><option value="nl">Nederlands</option><option value="es">Español</option></select></label>
     <label>E-mail<input id="login-user" type="email" autocomplete="username" placeholder="admin@example.com" required></label>
     <label>Password<input id="login-pass" type="password" autocomplete="current-password" required></label>
     <button class="btn primary wide" type="submit">Sign in</button>
@@ -50,13 +50,16 @@
       <button data-page="migration" class="sidebar-migration"><svg class="nav-icon" aria-hidden="true"><use href="/icons.svg#migration"></use></svg><span>Migration</span></button>
       <div class="sidebar-separator"></div>
       <div id="version" class="tiny muted"></div>
+      <a id="update-badge" class="update-badge hidden" href="https://github.com/ZentWorks/ZentProxy/releases" target="_blank" rel="noopener">
+        <svg class="ui-icon" aria-hidden="true"><use href="/icons.svg#refresh"></use></svg><span id="update-badge-text">New version</span>
+      </a>
       <button id="logout" class="link-btn">Sign out</button>
     </div>
   </aside>
   <main>
     <header class="topbar">
       <div class="page-heading"><span id="page-icon" class="page-icon" aria-hidden="true"><svg><use href="/icons.svg#overview"></use></svg></span><div><h1 id="page-title">Overview</h1><p id="page-subtitle" class="muted"></p></div></div>
-      <div class="topbar-actions"><label class="language-control"><span>Language</span><select id="language-select"><option value="de">Deutsch</option><option value="en">English</option></select></label><div id="top-actions"></div></div>
+      <div class="topbar-actions"><label class="language-control"><span>Language</span><select id="language-select"><option value="de">Deutsch</option><option value="en">English</option><option value="fr">Français</option><option value="nl">Nederlands</option><option value="es">Español</option></select></label><div id="top-actions"></div></div>
     </header>
     <section id="content" class="content"></section>
   </main>

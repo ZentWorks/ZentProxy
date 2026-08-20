@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: ZentProxy API
-  version: 0.7.10
+  version: 0.7.12
   description: Versioned API for ZentProxy proxy management, certificates, routing, analytics, trusted proxies, integrations, user preferences and migration tooling.
 servers:
   - url: /api/v1
@@ -245,7 +245,7 @@ paths:
     put:
       tags: [System]
       summary: Set the current administrator UI language
-      description: Interactive administrator session only. Supported languages are de and en.
+      description: Interactive administrator session only. Supported languages are de, en, fr, nl and es.
       security:
         - sessionCookie: []
       requestBody:
@@ -256,7 +256,7 @@ paths:
               type: object
               required: [language]
               properties:
-                language: { type: string, enum: [de, en] }
+                language: { type: string, enum: [de, en, fr, nl, es] }
       responses:
         '200': { description: Language preference saved }
         '422': { description: Unsupported language }
@@ -289,6 +289,12 @@ paths:
       tags: [System]
       summary: Discover API capabilities and available scopes
       responses: { '200': { description: OK } }
+  /system/update:
+    get:
+      tags: [System]
+      summary: Check whether a newer ZentProxy release is available
+      description: Interactive administrator session only. Uses a server-side 12-hour cache and the latest stable GitHub release. GitHub failures do not affect the WebUI.
+      responses: { '200': { description: Update status } }
   /hosts:
     get:
       tags: [Proxy Hosts]

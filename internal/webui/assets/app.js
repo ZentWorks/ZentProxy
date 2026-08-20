@@ -44,7 +44,7 @@ new MutationObserver((mutations) => {
 
 const state = {
   csrf: '', me: null, providers: [], hosts: [], page: 'dashboard', poll: null,
-  migrationCreds: null, migrationImporting: false, certificates: [], accessLists: [], docsArticle: 'getting-started', hostDomains: [], hostSearch: '', hostView: 'list', collapsedHostGroups: new Set(), analyticsAuto: true, analyticsRange: '24h', analyticsHost: '', analyticsZentLoop: 'all', analyticsCountdown: 5,
+  migrationCreds: null, migrationImporting: false, certificates: [], accessLists: [], docsArticle: 'getting-started', hostDomains: [], hostSearch: '', hostView: 'list', collapsedHostGroups: new Set(), analyticsAuto: true, analyticsRange: '24h', analyticsHost: '', analyticsZentLoop: 'all', analyticsCountdown: 5, updateTimer: null,
 };
 
 const titles = {
@@ -92,28 +92,66 @@ function esc(v) {
 }
 function toast(msg) {
   const e = $('#toast');
-  e.textContent = msg;
+  e.textContent = tr(msg);
   e.classList.remove('hidden');
   setTimeout(() => e.classList.add('hidden'), 2600);
 }
+function confirmT(msg) { return confirm(tr(msg)); }
 function showLogin() {
   clearInterval(state.poll);
+  clearTimeout(state.updateTimer);
+  state.updateTimer = null;
+  hideUpdateBadge();
   $('#app').classList.add('hidden');
   $('#login').classList.remove('hidden');
 }
+
+const UPDATE_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000;
+function hideUpdateBadge() {
+  const badge = $('#update-badge');
+  if (badge) badge.classList.add('hidden');
+}
+async function checkForUpdate() {
+  try {
+    const update = obj(await api('/api/v1/system/update'));
+    const badge = $('#update-badge');
+    const text = $('#update-badge-text');
+    if (!badge || !text || !update.update_available || !update.latest_version) {
+      hideUpdateBadge();
+      return;
+    }
+    text.textContent = `${tr('New version')} ${update.latest_version}`;
+    badge.href = update.release_url || 'https://github.com/ZentWorks/ZentProxy/releases';
+    badge.classList.remove('hidden');
+  } catch {
+    // Update checks are optional and must never disturb login or navigation.
+    hideUpdateBadge();
+  }
+}
+function scheduleUpdateChecks() {
+  clearTimeout(state.updateTimer);
+  void checkForUpdate();
+  state.updateTimer = setTimeout(function runUpdateCheck() {
+    void checkForUpdate();
+    state.updateTimer = setTimeout(runUpdateCheck, UPDATE_CHECK_INTERVAL_MS);
+  }, UPDATE_CHECK_INTERVAL_MS);
+}
+
 function showApp() {
   $('#login').classList.add('hidden');
   $('#app').classList.remove('hidden');
 }
 
 async function init() {
+  if (window.ZentI18n?.ready) await ZentI18n.ready;
   try {
     const me = await api('/api/v1/auth/me');
     state.me = me;
     state.csrf = me.csrf_token;
-    if (me.language && window.ZentI18n) ZentI18n.setLanguage(me.language);
+    if (me.language && window.ZentI18n) await ZentI18n.setLanguage(me.language);
     showApp();
     await loadPage('dashboard');
+    scheduleUpdateChecks();
   } catch {
     showLogin();
   }
@@ -129,9 +167,10 @@ $('#login-form').addEventListener('submit', async (e) => {
     });
     state.csrf = d.csrf_token;
     state.me = d;
-    if (d.language && window.ZentI18n) ZentI18n.setLanguage(d.language);
+    if (d.language && window.ZentI18n) await ZentI18n.setLanguage(d.language);
     showApp();
     await loadPage('dashboard');
+    scheduleUpdateChecks();
   } catch (err) {
     $('#login-error').textContent = err.message;
   }
@@ -195,7 +234,7 @@ async function dashboard() {
     </div>
     <div class="grid-2">
       <div class="card">${sectionHeading('proxy-hosts', 'Top hosts', '<span class="pill">24h</span>')}${countList(arr(stats.top_hosts))}</div>
-      <div class="card">${sectionHeading('status', 'Status codes', `<span class="pill">Avg ${num(stats.average_time_ms).toFixed(1)} ms</span>`)}${statusBars(obj(stats.status_classes), num(stats.requests))}</div>
+      <div class="card">${sectionHeading('status', 'Status codes', `<span class="pill">${esc(tr('Avg'))} ${num(stats.average_time_ms).toFixed(1)} ms</span>`)}${statusBars(obj(stats.status_classes), num(stats.requests))}</div>
     </div>
     <div class="grid-2">
       <div class="card">${sectionHeading('paths', 'Top paths')}${countList(arr(stats.top_paths))}</div>
@@ -417,7 +456,7 @@ $('#host-form').addEventListener('submit', async (e) => {
 });
 $('#host-delete').onclick = async () => {
   const id = $('#host-id').value;
-  if (!id || !confirm('Delete this proxy host?')) return;
+  if (!id || !confirmT('Delete this proxy host?')) return;
   try {
     await api(`/api/v1/hosts/${id}`, { method: 'DELETE' });
     $('#host-dialog').close(); toast('Host deleted'); await hosts();
@@ -455,12 +494,12 @@ async function certificatesPage() {
         <div id="custom-error" class="error-text"></div><div class="dialog-actions"><button class="btn primary">Import certificate</button></div>
       </form>
     </div>
-    <div class="card mt16"><div class="section-head"><h2>Certificates</h2><span class="muted">${fmtNum(certs.length)} total</span></div>${certificateTable(certs)}</div>`;
+    <div class="card mt16"><div class="section-head"><h2>Certificates</h2><span class="muted">${fmtNum(certs.length)} ${esc(tr('total'))}</span></div>${certificateTable(certs)}</div>`;
   $('#le-challenge').onchange = () => $('#dns-fields').classList.toggle('hidden', $('#le-challenge').value !== 'dns-01');
   $('#le-form').onsubmit = async (e) => { e.preventDefault(); $('#le-error').textContent=''; const creds={}; $('#le-dns-env').value.split(/\n/).forEach((line)=>{const i=line.indexOf('=');if(i>0)creds[line.slice(0,i).trim()]=line.slice(i+1).trim();}); try { await api('/api/v1/certificates/letsencrypt',{method:'POST',body:JSON.stringify({name:$('#le-name').value,domains:$('#le-domains').value.split(/\n|,/).map(x=>x.trim()).filter(Boolean),email:$('#le-email').value,challenge:$('#le-challenge').value,dns_provider:$('#le-dns-provider').value,dns_credentials:creds,auto_renew:$('#le-auto').checked})}); toast('Certificate issued'); await certificatesPage(); } catch(err){$('#le-error').textContent=err.message;} };
   $('#custom-cert-form').onsubmit = async (e) => { e.preventDefault(); $('#custom-error').textContent=''; try { await api('/api/v1/certificates/import',{method:'POST',body:JSON.stringify({name:$('#custom-name').value,provider:'custom',domains:$('#custom-domains').value.split(/\n|,/).map(x=>x.trim()).filter(Boolean),certificate_pem:$('#custom-cert').value,private_key_pem:$('#custom-key').value,auto_renew:false})}); toast('Certificate imported'); await certificatesPage(); } catch(err){$('#custom-error').textContent=err.message;} };
   $$('[data-renew-cert]').forEach((b)=>{b.onclick=async()=>{b.disabled=true;try{await api(`/api/v1/certificates/${b.dataset.renewCert}/renew`,{method:'POST'});toast('Certificate renewed');await certificatesPage();}catch(e){toast(e.message)}finally{b.disabled=false}}});
-  $$('[data-delete-cert]').forEach((b)=>{b.onclick=async()=>{if(!confirm('Delete this certificate?'))return;try{await api(`/api/v1/certificates/${b.dataset.deleteCert}`,{method:'DELETE'});toast('Certificate deleted');await certificatesPage();}catch(e){toast(e.message)}}});
+  $$('[data-delete-cert]').forEach((b)=>{b.onclick=async()=>{if(!confirmT('Delete this certificate?'))return;try{await api(`/api/v1/certificates/${b.dataset.deleteCert}`,{method:'DELETE'});toast('Certificate deleted');await certificatesPage();}catch(e){toast(e.message)}}});
   $$('[data-edit-cert]').forEach((b)=>{b.onclick=()=>openCertificateEditor(state.certificates.find(c=>c.id===+b.dataset.editCert));});
 }
 function certificateTable(certs) { certs=arr(certs); if(!certs.length)return '<div class="empty">No certificates yet.</div>'; return `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Description</th><th>Domains</th><th>Provider</th><th>Expires</th><th>Renewal</th><th></th></tr></thead><tbody>${certs.map((c)=>{const dc=arr(c.domains).length;return `<tr><td><strong>${esc(c.name)}</strong></td><td class="muted">${esc(c.description||'—')}</td><td class="certificate-domain-count">${fmtNum(dc)}</td><td>${esc(c.provider)}</td><td>${c.expires_at?new Date(c.expires_at).toLocaleString():'Unknown'}</td><td>${c.last_error?`<span class="danger-text">${esc(c.last_error)}</span>`:(c.auto_renew?'<span class="good-text">Automatic</span>':'Manual')}</td><td><div class="inline-actions"><button class="btn small" data-edit-cert="${c.id}">Edit</button>${c.provider.includes('letsencrypt')?`<button class="btn small" data-renew-cert="${c.id}">Renew</button>`:''}<button class="btn small danger" data-delete-cert="${c.id}">Delete</button></div></td></tr>`}).join('')}</tbody></table></div>`; }
@@ -645,7 +684,7 @@ async function zentloop() {
   const tabs=h.enabled?`<div class="dialog-tabs zentloop-tabs" role="tablist"><button type="button" class="dialog-tab active" data-zentloop-tab="integration">ZentLoop integration</button><button type="button" class="dialog-tab" data-zentloop-tab="lists">IP / CIDR lists</button><button type="button" class="dialog-tab" data-zentloop-tab="rules">Routing rules</button></div>`:'';
   $('#content').innerHTML=`<form id="zentloop-form" class="zentloop-page-stack">
     ${tabs}
-    <section class="zentloop-tab-panel active" data-zentloop-panel="integration"><div class="card max980"><div class="section-head"><div><h2 class="section-title"><span class="section-icon">${icon('zentloop')}</span>ZentLoop integration</h2><p class="muted">Configure routing, authentication and failure behavior. ZentProxy never waits indefinitely for an unavailable ZentLoop upstream.</p></div><span class="pill ${h.enabled?'good':''}">${h.enabled?'Enabled':'Disabled'}</span></div><label class="switch-row"><input id="zentloop-enabled" type="checkbox" ${h.enabled?'checked':''}><span>Enable ZentLoop routing</span><small>Enables catch-all routing and explicit rule actions that target ZentLoop.</small></label><label class="switch-row"><input id="zentloop-forward-unknown" type="checkbox" ${h.forward_unknown_hosts?'checked':''}><span>Forward unknown/fake hosts to ZentLoop</span><small>Known root domains are detected automatically from configured Proxy Hosts. With this disabled, hostnames outside those domains are rejected instead of reaching ZentLoop.</small></label><label>Upstream URL<input id="zentloop-upstream" value="${esc(h.upstream||'http://zentloop:8080')}" placeholder="http://zentloop:8080"></label><label>Shared signing secret<input id="zentloop-secret" type="password" value="${esc(h.secret||'')}" placeholder="Optional on private Docker networks"><small>When set, ZentProxy signs integration metadata with HMAC-SHA256. The health check verifies that ZentLoop accepts the same secret.</small></label><label>When ZentLoop is unavailable<select id="zentloop-fallback"><option value="block" ${h.fallback!=='503'?'selected':''}>Block request (403)</option><option value="503" ${h.fallback==='503'?'selected':''}>Return 503 Service Unavailable</option></select><small>Explicit ZentLoop routes fail closed; no request is sent to an unavailable integration.</small></label>${h.enabled?healthCard:''}</div></section>
+    <section class="zentloop-tab-panel active" data-zentloop-panel="integration"><div class="card max980"><div class="section-head"><div><h2 class="section-title"><span class="section-icon">${icon('zentloop')}</span>ZentLoop integration</h2><p class="muted">Configure routing, authentication and failure behavior. ZentProxy never waits indefinitely for an unavailable ZentLoop upstream.</p><p class="zentloop-project-link"><a class="good-text icon-link" href="https://github.com/ZentWorks/ZentLoop" target="_blank" rel="noopener noreferrer" title="Open the ZentLoop project, releases and installation information on GitHub.">${icon('external')}<span>ZentLoop on GitHub</span></a></p></div><span class="pill ${h.enabled?'good':''}">${h.enabled?'Enabled':'Disabled'}</span></div><label class="switch-row"><input id="zentloop-enabled" type="checkbox" ${h.enabled?'checked':''}><span>Enable ZentLoop routing</span><small>Enables catch-all routing and explicit rule actions that target ZentLoop.</small></label><label class="switch-row"><input id="zentloop-forward-unknown" type="checkbox" ${h.forward_unknown_hosts?'checked':''}><span>Forward unknown/fake hosts to ZentLoop</span><small>Known root domains are detected automatically from configured Proxy Hosts. With this disabled, hostnames outside those domains are rejected instead of reaching ZentLoop.</small></label><label>Upstream URL<input id="zentloop-upstream" value="${esc(h.upstream||'http://zentloop:8080')}" placeholder="http://zentloop:8080"></label><label>Shared signing secret<input id="zentloop-secret" type="password" value="${esc(h.secret||'')}" placeholder="Optional on private Docker networks"><small>When set, ZentProxy signs integration metadata with HMAC-SHA256. The health check verifies that ZentLoop accepts the same secret.</small></label><label>When ZentLoop is unavailable<select id="zentloop-fallback"><option value="block" ${h.fallback!=='503'?'selected':''}>Block request (403)</option><option value="503" ${h.fallback==='503'?'selected':''}>Return 503 Service Unavailable</option></select><small>Explicit ZentLoop routes fail closed; no request is sent to an unavailable integration.</small></label>${h.enabled?healthCard:''}</div></section>
     <section class="zentloop-tab-panel" data-zentloop-panel="lists"><div class="card max980"><div class="section-head"><div><h2>IP / CIDR lists</h2><p class="muted">Reusable source-IP lists. Trusted Proxy resolution happens first, so Cloudflare visitors are matched by their real client IP.</p></div><button id="add-zentloop-list" class="btn small" type="button">Add list</button></div><div id="zentloop-lists" class="zentloop-editor-stack">${arr(h.ip_lists).map(listRow).join('')||listRow()}</div></div></section>
     <section class="zentloop-tab-panel" data-zentloop-panel="rules"><div class="card max980"><div class="section-head"><div><h2>Routing rules</h2><p class="muted">Match an IP list or suspicious path and route it directly to ZentLoop, or block it. Empty host means all proxy hosts.</p></div><button id="add-zentloop-rule" class="btn small" type="button">Add rule</button></div><div id="zentloop-rules" class="zentloop-editor-stack">${arr(h.rules).map(ruleRow).join('')||ruleRow()}</div></div></section>
     <div id="zentloop-error" class="error-text"></div><div class="dialog-actions max980"><button class="btn primary btn-icon" type="submit">${icon('zentloop')}<span>Save integration</span></button></div></form>`;
@@ -657,7 +696,7 @@ async function zentloop() {
   if(addListButton)addListButton.onclick=()=>{$('#zentloop-lists').insertAdjacentHTML('beforeend',listRow());wire();};
   if(addRuleButton)addRuleButton.onclick=()=>{$('#zentloop-rules').insertAdjacentHTML('beforeend',ruleRow());wire();};
   const checkButton=$('#zentloop-check-now');
-  if(checkButton)checkButton.onclick=async()=>{checkButton.disabled=true;checkButton.textContent='Checking…';try{await api('/api/v1/integrations/zentloop/check',{method:'POST'});await zentloop();}catch(err){toast(err.message);}finally{checkButton.disabled=false;}};
+  if(checkButton)checkButton.onclick=async()=>{checkButton.disabled=true;checkButton.textContent=tr('Checking…');try{await api('/api/v1/integrations/zentloop/check',{method:'POST'});await zentloop();}catch(err){toast(err.message);}finally{checkButton.disabled=false;}};
   $('#zentloop-form').onsubmit=async(e)=>{
     e.preventDefault();$('#zentloop-error').textContent='';
     const ip_lists=$$('.zentloop-list-row').map(row=>({name:row.querySelector('[data-zentloop-list-name]').value.trim(),entries:row.querySelector('[data-zentloop-list-entries]').value.split(/[\n,]+/).map(x=>x.trim()).filter(Boolean)})).filter(x=>x.name||x.entries.length);
@@ -685,14 +724,14 @@ async function routingPage() {
   $$('[data-edit-dead]').forEach(r=>r.onclick=()=>openDeadEditor(ds.find(x=>x.id===+r.dataset.editDead)));
   $$('[data-edit-stream]').forEach(r=>r.onclick=()=>openStreamEditor(ss.find(x=>x.id===+r.dataset.editStream)));
 }
-function openRedirectEditor(x=null){const v=x||{domains:[],forward_http_code:301,forward_scheme:'https',forward_domain_name:'',preserve_path:true,certificate_id:null,ssl_forced:false,http2_support:false,hsts_enabled:false,hsts_subdomains:false,block_exploits:false,advanced_config:'',enabled:true};openEditorDialog(x?'Edit redirect host':'Add redirect host',`<label>Domains<textarea id="route-domains" rows="3" placeholder="old.example.com" required>${esc(domainsText(v.domains))}</textarea></label><div class="form-grid"><label>Target scheme<select id="route-scheme"><option value="auto" ${v.forward_scheme==='auto'?'selected':''}>auto</option><option value="https" ${v.forward_scheme==='https'?'selected':''}>https</option><option value="http" ${v.forward_scheme==='http'?'selected':''}>http</option></select></label><label>Target domain<input id="route-target" value="${esc(v.forward_domain_name)}" required></label><label>HTTP code<select id="route-code">${[301,302,307,308].map(n=>`<option ${v.forward_http_code===n?'selected':''}>${n}</option>`).join('')}</select></label></div><div class="switch-grid"><label class="switch-row"><input id="route-preserve" type="checkbox" ${v.preserve_path?'checked':''}><span>Preserve path</span></label>${checkbox('route-enabled',v.enabled)}</div>`,{dangerLabel:x?'Delete':'',onDanger:x?async()=>{if(!confirm('Delete this redirect host?'))throw new Error('Cancelled');await api(`/api/v1/redirect-hosts/${x.id}`,{method:'DELETE'});toast('Redirect deleted');await routingPage()}:null,onSave:async()=>{const body={domains:parseDomains($('#route-domains').value),forward_http_code:+$('#route-code').value,forward_scheme:$('#route-scheme').value,forward_domain_name:$('#route-target').value.trim(),preserve_path:$('#route-preserve').checked,certificate_id:v.certificate_id??null,ssl_forced:!!v.ssl_forced,http2_support:!!v.http2_support,hsts_enabled:!!v.hsts_enabled,hsts_subdomains:!!v.hsts_subdomains,block_exploits:!!v.block_exploits,advanced_config:v.advanced_config||'',enabled:$('#route-enabled').checked};await api(x?`/api/v1/redirect-hosts/${x.id}`:'/api/v1/redirect-hosts',{method:x?'PUT':'POST',body:JSON.stringify(body)});toast(x?'Redirect updated':'Redirect created');await routingPage();}})}
-function openDeadEditor(x=null){const v=x||{domains:[],certificate_id:null,ssl_forced:false,http2_support:false,hsts_enabled:false,hsts_subdomains:false,advanced_config:'',enabled:true};openEditorDialog(x?'Edit 404 host':'Add 404 host',`<label>Domains<textarea id="dead-domains" rows="4" placeholder="unused.example.com" required>${esc(domainsText(v.domains))}</textarea></label>${checkbox('dead-enabled',v.enabled)}`,{dangerLabel:x?'Delete':'',onDanger:x?async()=>{if(!confirm('Delete this 404 host?'))throw new Error('Cancelled');await api(`/api/v1/dead-hosts/${x.id}`,{method:'DELETE'});toast('404 host deleted');await routingPage()}:null,onSave:async()=>{const body={domains:parseDomains($('#dead-domains').value),certificate_id:v.certificate_id??null,ssl_forced:!!v.ssl_forced,http2_support:!!v.http2_support,hsts_enabled:!!v.hsts_enabled,hsts_subdomains:!!v.hsts_subdomains,advanced_config:v.advanced_config||'',enabled:$('#dead-enabled').checked};await api(x?`/api/v1/dead-hosts/${x.id}`:'/api/v1/dead-hosts',{method:x?'PUT':'POST',body:JSON.stringify(body)});toast(x?'404 host updated':'404 host created');await routingPage();}})}
-function openStreamEditor(x=null){const v=x||{incoming_port:0,forward_host:'',forward_port:0,tcp_forwarding:true,udp_forwarding:false,certificate_id:null,enabled:true};openEditorDialog(x?'Edit stream':'Add stream',`<div class="form-grid"><label>Incoming port<input id="stream-in" type="number" min="1" max="65535" value="${num(v.incoming_port)||''}" required></label><label>Forward host<input id="stream-host" value="${esc(v.forward_host)}" required></label><label>Forward port<input id="stream-port" type="number" min="1" max="65535" value="${num(v.forward_port)||''}" required></label></div><div class="switch-grid"><label class="switch-row"><input id="stream-tcp" type="checkbox" ${v.tcp_forwarding?'checked':''}><span>TCP</span></label><label class="switch-row"><input id="stream-udp" type="checkbox" ${v.udp_forwarding?'checked':''}><span>UDP</span></label>${checkbox('stream-enabled',v.enabled)}</div>`,{dangerLabel:x?'Delete':'',onDanger:x?async()=>{if(!confirm('Delete this stream?'))throw new Error('Cancelled');await api(`/api/v1/streams/${x.id}`,{method:'DELETE'});toast('Stream deleted');await routingPage()}:null,onSave:async()=>{const body={incoming_port:+$('#stream-in').value,forward_host:$('#stream-host').value.trim(),forward_port:+$('#stream-port').value,tcp_forwarding:$('#stream-tcp').checked,udp_forwarding:$('#stream-udp').checked,certificate_id:v.certificate_id??null,enabled:$('#stream-enabled').checked};await api(x?`/api/v1/streams/${x.id}`:'/api/v1/streams',{method:x?'PUT':'POST',body:JSON.stringify(body)});toast(x?'Stream updated':'Stream created');await routingPage();}})}
+function openRedirectEditor(x=null){const v=x||{domains:[],forward_http_code:301,forward_scheme:'https',forward_domain_name:'',preserve_path:true,certificate_id:null,ssl_forced:false,http2_support:false,hsts_enabled:false,hsts_subdomains:false,block_exploits:false,advanced_config:'',enabled:true};openEditorDialog(x?'Edit redirect host':'Add redirect host',`<label>Domains<textarea id="route-domains" rows="3" placeholder="old.example.com" required>${esc(domainsText(v.domains))}</textarea></label><div class="form-grid"><label>Target scheme<select id="route-scheme"><option value="auto" ${v.forward_scheme==='auto'?'selected':''}>auto</option><option value="https" ${v.forward_scheme==='https'?'selected':''}>https</option><option value="http" ${v.forward_scheme==='http'?'selected':''}>http</option></select></label><label>Target domain<input id="route-target" value="${esc(v.forward_domain_name)}" required></label><label>HTTP code<select id="route-code">${[301,302,307,308].map(n=>`<option ${v.forward_http_code===n?'selected':''}>${n}</option>`).join('')}</select></label></div><div class="switch-grid"><label class="switch-row"><input id="route-preserve" type="checkbox" ${v.preserve_path?'checked':''}><span>Preserve path</span></label>${checkbox('route-enabled',v.enabled)}</div>`,{dangerLabel:x?'Delete':'',onDanger:x?async()=>{if(!confirmT('Delete this redirect host?'))throw new Error(tr('Cancelled'));await api(`/api/v1/redirect-hosts/${x.id}`,{method:'DELETE'});toast('Redirect deleted');await routingPage()}:null,onSave:async()=>{const body={domains:parseDomains($('#route-domains').value),forward_http_code:+$('#route-code').value,forward_scheme:$('#route-scheme').value,forward_domain_name:$('#route-target').value.trim(),preserve_path:$('#route-preserve').checked,certificate_id:v.certificate_id??null,ssl_forced:!!v.ssl_forced,http2_support:!!v.http2_support,hsts_enabled:!!v.hsts_enabled,hsts_subdomains:!!v.hsts_subdomains,block_exploits:!!v.block_exploits,advanced_config:v.advanced_config||'',enabled:$('#route-enabled').checked};await api(x?`/api/v1/redirect-hosts/${x.id}`:'/api/v1/redirect-hosts',{method:x?'PUT':'POST',body:JSON.stringify(body)});toast(x?'Redirect updated':'Redirect created');await routingPage();}})}
+function openDeadEditor(x=null){const v=x||{domains:[],certificate_id:null,ssl_forced:false,http2_support:false,hsts_enabled:false,hsts_subdomains:false,advanced_config:'',enabled:true};openEditorDialog(x?'Edit 404 host':'Add 404 host',`<label>Domains<textarea id="dead-domains" rows="4" placeholder="unused.example.com" required>${esc(domainsText(v.domains))}</textarea></label>${checkbox('dead-enabled',v.enabled)}`,{dangerLabel:x?'Delete':'',onDanger:x?async()=>{if(!confirmT('Delete this 404 host?'))throw new Error(tr('Cancelled'));await api(`/api/v1/dead-hosts/${x.id}`,{method:'DELETE'});toast('404 host deleted');await routingPage()}:null,onSave:async()=>{const body={domains:parseDomains($('#dead-domains').value),certificate_id:v.certificate_id??null,ssl_forced:!!v.ssl_forced,http2_support:!!v.http2_support,hsts_enabled:!!v.hsts_enabled,hsts_subdomains:!!v.hsts_subdomains,advanced_config:v.advanced_config||'',enabled:$('#dead-enabled').checked};await api(x?`/api/v1/dead-hosts/${x.id}`:'/api/v1/dead-hosts',{method:x?'PUT':'POST',body:JSON.stringify(body)});toast(x?'404 host updated':'404 host created');await routingPage();}})}
+function openStreamEditor(x=null){const v=x||{incoming_port:0,forward_host:'',forward_port:0,tcp_forwarding:true,udp_forwarding:false,certificate_id:null,enabled:true};openEditorDialog(x?'Edit stream':'Add stream',`<div class="form-grid"><label>Incoming port<input id="stream-in" type="number" min="1" max="65535" value="${num(v.incoming_port)||''}" required></label><label>Forward host<input id="stream-host" value="${esc(v.forward_host)}" required></label><label>Forward port<input id="stream-port" type="number" min="1" max="65535" value="${num(v.forward_port)||''}" required></label></div><div class="switch-grid"><label class="switch-row"><input id="stream-tcp" type="checkbox" ${v.tcp_forwarding?'checked':''}><span>TCP</span></label><label class="switch-row"><input id="stream-udp" type="checkbox" ${v.udp_forwarding?'checked':''}><span>UDP</span></label>${checkbox('stream-enabled',v.enabled)}</div>`,{dangerLabel:x?'Delete':'',onDanger:x?async()=>{if(!confirmT('Delete this stream?'))throw new Error(tr('Cancelled'));await api(`/api/v1/streams/${x.id}`,{method:'DELETE'});toast('Stream deleted');await routingPage()}:null,onSave:async()=>{const body={incoming_port:+$('#stream-in').value,forward_host:$('#stream-host').value.trim(),forward_port:+$('#stream-port').value,tcp_forwarding:$('#stream-tcp').checked,udp_forwarding:$('#stream-udp').checked,certificate_id:v.certificate_id??null,enabled:$('#stream-enabled').checked};await api(x?`/api/v1/streams/${x.id}`:'/api/v1/streams',{method:x?'PUT':'POST',body:JSON.stringify(body)});toast(x?'Stream updated':'Stream created');await routingPage();}})}
 
 async function accessListsPage(){
   const lists=arr(await api('/api/v1/access-lists')); state.accessLists=lists;
   $('#top-actions').innerHTML=`<button id="add-access-list" class="btn primary btn-icon">${icon('add')}<span>Add access list</span></button>`;
-  $('#content').innerHTML=lists.length?`<div class="management-stack">${lists.map(x=>`<div class="card clickable-card" data-access-list="${x.id}"><div class="section-head"><div><h2>${esc(x.name)}</h2><p class="muted">${arr(x.rules).filter(r=>r.directive==='allow').length} allow · ${arr(x.rules).filter(r=>r.directive==='deny').length} deny${x.auth_enabled?' · Login required':''}</p></div><span class="row-chevron">›</span></div><div class="pill-row">${arr(x.rules).slice(0,8).map(r=>`<span class="pill ${r.directive==='allow'?'good':'warn'}">${esc(r.directive)} ${esc(r.address)}</span>`).join(' ')}</div></div>`).join('')}</div>`:emptyState('access','No access lists.');
+  $('#content').innerHTML=lists.length?`<div class="management-stack">${lists.map(x=>`<div class="card clickable-card" data-access-list="${x.id}"><div class="section-head"><div><h2>${esc(x.name)}</h2><p class="muted">${arr(x.rules).filter(r=>r.directive==='allow').length} ${esc(tr('allow'))} · ${arr(x.rules).filter(r=>r.directive==='deny').length} ${esc(tr('deny'))}${x.auth_enabled?` · ${esc(tr('Login required'))}`:''}</p></div><span class="row-chevron">›</span></div><div class="pill-row">${arr(x.rules).slice(0,8).map(r=>`<span class="pill ${r.directive==='allow'?'good':'warn'}">${esc(tr(r.directive))} ${esc(r.address)}</span>`).join(' ')}</div></div>`).join('')}</div>`:emptyState('access','No access lists.');
   $('#add-access-list').onclick=()=>openAccessListEditor(); $$('[data-access-list]').forEach(el=>el.onclick=()=>openAccessListEditor(lists.find(x=>x.id===+el.dataset.accessList)));
 }
 async function openAccessListEditor(x=null){
@@ -708,7 +747,7 @@ async function openAccessListEditor(x=null){
     <section id="access-combination" class="access-editor-section"><h3>When IP rules and login are both used</h3><div class="access-mode-row"><label class="switch-row"><input name="access-mode" id="access-mode-all" type="radio" ${v.satisfy_any?'':'checked'}><span>Both required</span><small>The client must satisfy the IP rules and provide valid credentials.</small></label><label class="switch-row"><input name="access-mode" id="access-mode-any" type="radio" ${v.satisfy_any?'checked':''}><span>Either is enough</span><small>Allow when the IP rules or valid credentials match.</small></label></div></section>
     <label class="switch-row"><input id="access-pass-auth" type="checkbox" ${v.pass_auth?'checked':''}><span>Forward Authorization header</span><small>Pass the client's Authorization header to the upstream application.</small></label>`,{
       dangerLabel:x?'Delete':'',
-      onDanger:x?async()=>{if(!confirm('Delete this access list?'))throw new Error('Cancelled');await api(`/api/v1/access-lists/${x.id}`,{method:'DELETE'});toast('Access list deleted');await accessListsPage()}:null,
+      onDanger:x?async()=>{if(!confirmT('Delete this access list?'))throw new Error(tr('Cancelled'));await api(`/api/v1/access-lists/${x.id}`,{method:'DELETE'});toast('Access list deleted');await accessListsPage()}:null,
       onSave:async()=>{
         const parseLines=(id,directive)=>$('#'+id).value.split(/\n|,/).map(v=>v.trim()).filter(Boolean).map(address=>({directive,address}));
         const rules=[...parseLines('access-allow','allow'),...parseLines('access-deny','deny')];
@@ -716,7 +755,7 @@ async function openAccessListEditor(x=null){
         const activeExisting=pendingRows.filter(row=>row.dataset.existingUser&&!row.dataset.remove).map(row=>row.dataset.existingUser);
         const stagedNew=pendingRows.filter(row=>row.dataset.newUser&&!row.dataset.remove).map(row=>({username:row.dataset.newUser,password:row.dataset.password||''}));
         const authEnabled=$('#access-auth-enabled').checked;
-        if(authEnabled && activeExisting.length+stagedNew.length===0) throw new Error('Add at least one username/password or disable login credentials.');
+        if(authEnabled && activeExisting.length+stagedNew.length===0) throw new Error(tr('Add at least one username/password or disable login credentials.'));
         const body={name:$('#access-name').value.trim(),satisfy_any:$('#access-mode-any').checked,pass_auth:$('#access-pass-auth').checked,auth_enabled:authEnabled,rules};
         const saved=await api(x?`/api/v1/access-lists/${x.id}`:'/api/v1/access-lists',{method:x?'PUT':'POST',body:JSON.stringify(body)});
         const id=saved.id;
@@ -734,7 +773,7 @@ async function openAccessListEditor(x=null){
     });
   const credentials=$('#access-credentials');
   credentials.querySelectorAll('.credential-remove').forEach(btn=>btn.onclick=()=>{const row=btn.closest('.credential-row');row.dataset.remove='1';row.classList.add('hidden')});
-  $('#access-add-user').onclick=()=>{const user=$('#access-new-user').value.trim(),pass=$('#access-new-pass').value;if(!user)return $('#resource-error').textContent='Enter a username.';if(pass.length<8)return $('#resource-error').textContent='Password must be at least 8 characters.';if(Array.from($$('.credential-row')).some(r=>(r.dataset.existingUser||r.dataset.newUser)===user&&!r.dataset.remove))return $('#resource-error').textContent='This username already exists.';const row=document.createElement('div');row.className='credential-row';row.dataset.newUser=user;row.dataset.password=pass;row.innerHTML=`<div class="credential-user">${esc(user)}</div><div class="muted">New credential</div><button type="button" class="btn small danger credential-remove">Remove</button>`;row.querySelector('.credential-remove').onclick=()=>row.remove();credentials.appendChild(row);$('#access-new-user').value='';$('#access-new-pass').value='';$('#resource-error').textContent='';};
+  $('#access-add-user').onclick=()=>{const user=$('#access-new-user').value.trim(),pass=$('#access-new-pass').value;if(!user)return $('#resource-error').textContent=tr('Enter a username.');if(pass.length<8)return $('#resource-error').textContent=tr('Password must be at least 8 characters.');if(Array.from($$('.credential-row')).some(r=>(r.dataset.existingUser||r.dataset.newUser)===user&&!r.dataset.remove))return $('#resource-error').textContent=tr('This username already exists.');const row=document.createElement('div');row.className='credential-row';row.dataset.newUser=user;row.dataset.password=pass;row.innerHTML=`<div class="credential-user">${esc(user)}</div><div class="muted">New credential</div><button type="button" class="btn small danger credential-remove">Remove</button>`;row.querySelector('.credential-remove').onclick=()=>row.remove();credentials.appendChild(row);$('#access-new-user').value='';$('#access-new-pass').value='';$('#resource-error').textContent='';};
   return d;
 }
 
@@ -773,7 +812,7 @@ async function migrationPage() {
       base_url: $('#migration-url').value.trim(), identity: $('#migration-identity').value.trim(),
       secret: $('#migration-secret').value, tls_skip_verify: $('#migration-tls-skip').checked,
     };
-    button.disabled = true; button.textContent = 'Analyzing…';
+    button.disabled = true; button.textContent = tr('Analyzing…');
     try {
       const analysis = await api('/api/v1/migration/analyze', { method: 'POST', body: JSON.stringify(state.migrationCreds) });
       renderMigrationAnalysis(obj(analysis));
@@ -781,7 +820,7 @@ async function migrationPage() {
       $('#migration-error').textContent = err.message;
       $('#migration-analysis').innerHTML = '';
     } finally {
-      button.disabled = false; button.textContent = 'Analyze installation';
+      button.disabled = false; button.textContent = tr('Analyze installation');
     }
   };
 }
@@ -792,14 +831,14 @@ function renderMigrationAnalysis(a) {
   const blockers = resources.filter((r) => num(r.count) > 0 && !r.importable && r.key !== 'users');
   $('#migration-analysis').innerHTML = `
     <div class="card">
-      <div class="section-head"><div><h2>Analysis</h2><p class="muted">${esc(source.url)}${source.version ? ` · version ${esc(source.version)}` : ''}</p></div><span class="pill good">Read only</span></div>
+      <div class="section-head"><div><h2>Analysis</h2><p class="muted">${esc(source.url)}${source.version ? ` · ${esc(tr('version'))} ${esc(source.version)}` : ''}</p></div><span class="pill good">Read only</span></div>
       <div class="migration-resource-grid">${resources.map((r) => `<div class="migration-resource"><span class="muted">${esc(r.label)}</span><strong>${resourceCountText(r)}</strong><small class="${r.importable ? 'good-text' : (num(r.count)>0 && r.key!=='users' ? 'warn-text' : '')}">${esc(r.note || '')}</small></div>`).join('')}</div>
       ${certs.length ? `<div class="mt16"><div class="section-head"><h2>Certificate migration</h2></div><div class="list">${certs.map(c=>{const status=c.reissue?'Reissue after migration':(c.importable?'Ready':esc(c.warning||'Needs certificate material'));const detail=c.reissue&&c.warning?`<small class="warn-text">${esc(c.warning)}</small>`:'';return `<div class="list-row"><span>${esc(c.name)} · ${esc(c.provider)}${detail}</span><strong class="${c.reissue?'warn-text':(c.importable?'good-text':'warn-text')}">${status}</strong></div>`;}).join('')}</div></div>` : ''}
       ${blockers.length ? `<div class="card danger-text mt16"><strong>Full migration is blocked until the required source material is available.</strong><div class="tiny mt8">${blockers.map((r)=>`<div>${esc(r.label)}: ${esc(r.note || 'not safely importable')}</div>`).join('')}</div></div>` : ''}
     </div>
     <div id="migration-import-error" class="migration-primary-error" role="alert" aria-live="assertive"></div>
     <div class="card mt16">
-      <div class="section-head"><div><h2>Proxy hosts</h2><p class="muted">${fmtNum(a.importable_proxy_hosts)} ready · ${fmtNum(a.blocked_proxy_hosts)} blocked</p></div><div class="inline-actions"><button id="migration-select-all" class="btn small">Select ready</button><button id="migration-import" class="btn primary" ${blockers.length?'disabled':''}>Import migration</button></div></div>
+      <div class="section-head"><div><h2>Proxy hosts</h2><p class="muted">${fmtNum(a.importable_proxy_hosts)} ${esc(tr('ready'))} · ${fmtNum(a.blocked_proxy_hosts)} ${esc(tr('blocked'))}</p></div><div class="inline-actions"><button id="migration-select-all" class="btn small">Select ready</button><button id="migration-import" class="btn primary" ${blockers.length?'disabled':''}>Import migration</button></div></div>
       ${migrationPlanTable(plans)}
       <div id="migration-result"></div>
     </div>`;
@@ -810,18 +849,17 @@ function renderMigrationAnalysis(a) {
   if (importButton) importButton.onclick = async () => {
     if (state.migrationImporting) return;
     const ids = $$('[data-migration-host]:checked').map((x) => +x.value).filter((x) => x > 0);
-    if (!ids.length && plans.length) { $('#migration-import-error').textContent = 'Select at least one ready proxy host.'; return; }
-    if (!state.migrationCreds) { $('#migration-import-error').textContent = 'Run the analysis again before importing.'; return; }
+    if (!ids.length && plans.length) { $('#migration-import-error').textContent = tr('Select at least one ready proxy host.'); return; }
+    if (!state.migrationCreds) { $('#migration-import-error').textContent = tr('Run the analysis again before importing.'); return; }
     $('#migration-import-error').textContent = '';
-    const hostText = ids.length ? `${ids.length} selected proxy host${ids.length === 1 ? '' : 's'}` : 'the detected routing configuration';
-    if (!confirm(`Import ${hostText} plus compatible certificates, access lists, redirects, 404 hosts and streams into ZentProxy?`)) return;
+    if (!confirmT('Import the selected proxy hosts plus compatible certificates, access lists, redirects, 404 hosts and streams into ZentProxy?')) return;
     state.migrationImporting = true;
-    importButton.disabled = true; importButton.setAttribute('aria-busy', 'true'); importButton.textContent = 'Importing…';
+    importButton.disabled = true; importButton.setAttribute('aria-busy', 'true'); importButton.textContent = tr('Importing…');
     if (selectAll) selectAll.disabled = true;
     try {
       const result = obj(await api('/api/v1/migration/import', { method: 'POST', body: JSON.stringify({ ...state.migrationCreds, source_ids: ids }) }));
       const certFailures = num(result.failed_certificates);
-      $('#migration-result').innerHTML = `<div class="success-banner"><strong>${fmtNum(result.imported)} proxy hosts · ${fmtNum(result.imported_certificates)} certificates · ${fmtNum(result.imported_access_lists)} access lists · ${fmtNum(result.imported_redirect_hosts)} redirects · ${fmtNum(result.imported_dead_hosts)} 404 hosts · ${fmtNum(result.imported_streams)} streams imported.</strong>${certFailures ? `<div class="warn-text mt8"><strong>${fmtNum(certFailures)} certificate request${certFailures === 1 ? '' : 's'} failed. The remaining migration was completed.</strong></div>` : ''}${arr(result.warnings).length ? `<div class="tiny mt8">${arr(result.warnings).map((w) => `<div>${esc(w)}</div>`).join('')}</div>` : ''}<div class="mt8"><button id="migration-open-hosts" class="btn small">Open Proxy Hosts</button></div></div>`;
+      $('#migration-result').innerHTML = `<div class="success-banner"><strong>${fmtNum(result.imported)} ${esc(tr('proxy hosts'))} · ${fmtNum(result.imported_certificates)} ${esc(tr('certificates'))} · ${fmtNum(result.imported_access_lists)} ${esc(tr('access lists'))} · ${fmtNum(result.imported_redirect_hosts)} ${esc(tr('redirects'))} · ${fmtNum(result.imported_dead_hosts)} ${esc(tr('404 hosts'))} · ${fmtNum(result.imported_streams)} ${esc(tr('streams imported'))}</strong>${certFailures ? `<div class="warn-text mt8"><strong>${fmtNum(certFailures)} ${esc(tr(certFailures === 1 ? 'certificate request failed. The remaining migration was completed.' : 'certificate requests failed. The remaining migration was completed.'))}</strong></div>` : ''}${arr(result.warnings).length ? `<div class="tiny mt8">${arr(result.warnings).map((w) => `<div>${esc(w)}</div>`).join('')}</div>` : ''}<div class="mt8"><button id="migration-open-hosts" class="btn small">Open Proxy Hosts</button></div></div>`;
       $('#migration-open-hosts').onclick = () => loadPage('hosts');
       ids.forEach((id) => { const cb = $(`[data-migration-host][value="${id}"]`); if (cb) { cb.checked = false; cb.disabled = true; } });
       toast('Migration completed');
@@ -829,7 +867,7 @@ function renderMigrationAnalysis(a) {
       $('#migration-import-error').textContent = err.message;
     } finally {
       state.migrationImporting = false;
-      importButton.removeAttribute('aria-busy'); importButton.disabled = blockers.length > 0; importButton.textContent = 'Import migration';
+      importButton.removeAttribute('aria-busy'); importButton.disabled = blockers.length > 0; importButton.textContent = tr('Import migration');
       if (selectAll) selectAll.disabled = false;
     }
   };
@@ -859,7 +897,7 @@ async function developers() {
       await developers();
     } catch (err) { $('#key-error').textContent = err.message; }
   };
-  $$('[data-revoke-key]').forEach((b) => { b.onclick = async () => { if (!confirm('Revoke this API key?')) return; await api(`/api/v1/api-keys/${b.dataset.revokeKey}`, { method: 'DELETE' }); toast('API key revoked'); await developers(); }; });
+  $$('[data-revoke-key]').forEach((b) => { b.onclick = async () => { if (!confirmT('Revoke this API key?')) return; await api(`/api/v1/api-keys/${b.dataset.revokeKey}`, { method: 'DELETE' }); toast('API key revoked'); await developers(); }; });
 }
 function apiKeyTable(keys) {
   keys = arr(keys);
@@ -877,7 +915,7 @@ async function audit() {
 }
 
 
-function docLanguage() { return (window.ZentI18n && ZentI18n.language === 'de') ? 'de' : 'en'; }
+function docLanguage() { return window.ZentI18n?.language || 'en'; }
 function documentationPage() {
   const lang = docLanguage();
   const source = window.ZentDocs?.articles || [];
@@ -914,9 +952,9 @@ function documentationPage() {
 }
 
 async function persistLanguage(language) {
-  if (!['de','en'].includes(language)) return;
+  if (!['de','en','fr','nl','es'].includes(language)) return;
   if (!state.me) {
-    ZentI18n.setLanguage(language);
+    await ZentI18n.setLanguage(language);
     location.reload();
     return;
   }
@@ -928,6 +966,6 @@ async function persistLanguage(language) {
 }
 
 $('#language-select').addEventListener('change', (e) => persistLanguage(e.target.value));
-$('#login-language').addEventListener('change', (e) => { ZentI18n.setLanguage(e.target.value); location.reload(); });
+$('#login-language').addEventListener('change', async (e) => { await ZentI18n.setLanguage(e.target.value); location.reload(); });
 
 init();

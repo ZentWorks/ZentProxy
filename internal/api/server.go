@@ -39,6 +39,7 @@ type Server struct {
 	mux         *http.ServeMux
 	migrationMu sync.Mutex
 	zentLoop    *zentloop.Monitor
+	updates     *releaseChecker
 }
 
 type principal struct {
@@ -62,7 +63,7 @@ func New(cfg config.Config, store *db.Store, pm *proxy.Manager, providerManager 
 	if len(monitors) > 0 {
 		zentLoopMonitor = monitors[0]
 	}
-	s := &Server{cfg: cfg, store: store, proxy: pm, providers: providerManager, certs: certManager, zentLoop: zentLoopMonitor, mux: http.NewServeMux()}
+	s := &Server{cfg: cfg, store: store, proxy: pm, providers: providerManager, certs: certManager, zentLoop: zentLoopMonitor, updates: newReleaseChecker(cfg.Version), mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
@@ -83,6 +84,7 @@ func (s *Server) routes() {
 	s.mux.Handle("PUT /api/v1/user/preferences/language", s.requireSession(http.HandlerFunc(s.setLanguage)))
 	s.mux.Handle("PUT /api/v1/user/preferences/proxy-hosts-view", s.requireSession(http.HandlerFunc(s.setProxyHostsView)))
 	s.mux.Handle("GET /api/v1/system/info", s.require("system:read", http.HandlerFunc(s.systemInfo)))
+	s.mux.Handle("GET /api/v1/system/update", s.requireSession(http.HandlerFunc(s.systemUpdate)))
 	s.mux.Handle("GET /api/v1/system/capabilities", s.require("system:read", http.HandlerFunc(s.capabilities)))
 
 	s.mux.Handle("GET /api/v1/hosts", s.require("hosts:read", http.HandlerFunc(s.hostsList)))
@@ -299,7 +301,7 @@ func (s *Server) setLanguage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	language := strings.ToLower(strings.TrimSpace(in.Language))
-	if language != "de" && language != "en" {
+	if language != "de" && language != "en" && language != "fr" && language != "nl" && language != "es" {
 		jsonError(w, 422, "unsupported language")
 		return
 	}
