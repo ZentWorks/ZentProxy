@@ -15,6 +15,9 @@ func Handler() http.Handler {
 	sub, _ := fs.Sub(assets, "assets")
 	files := http.FileServer(http.FS(sub))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/service-worker.js" || r.URL.Path == "/manifest.webmanifest" {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			http.NotFound(w, r)
 			return

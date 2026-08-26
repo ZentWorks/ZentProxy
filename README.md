@@ -29,12 +29,6 @@ The production image is published to GitHub Container Registry:
 ghcr.io/zentworks/zentproxy:latest
 ```
 
-Versioned releases can additionally be pulled by tag, for example:
-
-```text
-ghcr.io/zentworks/zentproxy:1.0.0
-```
-
 ZentProxy can be started with Docker Compose, directly with `docker run`, or through Unraid.
 
 ## 1. Docker Compose

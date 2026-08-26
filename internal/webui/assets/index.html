@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#071129">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ZentProxy">
   <title>ZentProxy</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="/zentproxy-icon-32.png">
@@ -27,7 +31,8 @@
 </div>
 
 <div id="app" class="shell hidden">
-  <aside class="sidebar">
+  <button id="mobile-nav-backdrop" class="mobile-nav-backdrop hidden" type="button" aria-label="Close navigation"></button>
+  <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
     <div class="brand"><img class="brand-mark" src="/zentproxy-mark.png" alt="" aria-hidden="true"><span>ZentProxy</span></div>
     <nav id="nav">
       <button data-page="dashboard" class="active"><svg class="nav-icon" aria-hidden="true"><use href="/icons.svg#overview"></use></svg><span>Overview</span></button>
@@ -58,6 +63,7 @@
   </aside>
   <main>
     <header class="topbar">
+      <button id="mobile-nav-toggle" class="mobile-nav-toggle" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false"><span></span><span></span><span></span></button>
       <div class="page-heading"><span id="page-icon" class="page-icon" aria-hidden="true"><svg><use href="/icons.svg#overview"></use></svg></span><div><h1 id="page-title">Overview</h1><p id="page-subtitle" class="muted"></p></div></div>
       <div class="topbar-actions"><label class="language-control"><span>Language</span><select id="language-select"><option value="de">Deutsch</option><option value="en">English</option><option value="fr">Français</option><option value="nl">Nederlands</option><option value="es">Español</option></select></label><div id="top-actions"></div></div>
     </header>

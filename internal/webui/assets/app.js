@@ -33,11 +33,35 @@ function applyAutocompletePolicy(root = document) {
   }
 }
 
+function enhanceResponsiveTables(root = document) {
+  const tables = new Set();
+  if (root?.matches?.('table')) tables.add(root);
+  if (root?.closest) {
+    const parentTable = root.closest('table');
+    if (parentTable) tables.add(parentTable);
+  }
+  if (root?.querySelectorAll) root.querySelectorAll('table').forEach((table) => tables.add(table));
+  for (const table of tables) {
+    const headers = [...table.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+    if (!headers.length) continue;
+    table.classList.add('responsive-table');
+    table.querySelectorAll('tbody tr').forEach((row) => {
+      [...row.children].forEach((cell, index) => {
+        if (cell.tagName !== 'TD') return;
+        cell.dataset.label = headers[index] || '';
+      });
+    });
+  }
+}
+
 applyAutocompletePolicy();
+enhanceResponsiveTables();
 new MutationObserver((mutations) => {
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
-      if (node.nodeType === Node.ELEMENT_NODE) applyAutocompletePolicy(node);
+      if (node.nodeType !== Node.ELEMENT_NODE) continue;
+      applyAutocompletePolicy(node);
+      enhanceResponsiveTables(node);
     }
   }
 }).observe(document.body, { childList: true, subtree: true });
@@ -137,9 +161,29 @@ function scheduleUpdateChecks() {
   }, UPDATE_CHECK_INTERVAL_MS);
 }
 
+function setMobileNavigation(open) {
+  const sidebar = $('#sidebar');
+  const toggle = $('#mobile-nav-toggle');
+  const backdrop = $('#mobile-nav-backdrop');
+  if (!sidebar || !toggle || !backdrop) return;
+  sidebar.classList.toggle('mobile-open', !!open);
+  backdrop.classList.toggle('hidden', !open);
+  document.body.classList.toggle('mobile-nav-open', !!open);
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  toggle.setAttribute('aria-label', tr(open ? 'Close navigation' : 'Open navigation'));
+}
+
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js', { scope: '/' }).catch((err) => console.warn('Service worker registration failed', err));
+  }, { once: true });
+}
+
 function showApp() {
   $('#login').classList.add('hidden');
   $('#app').classList.remove('hidden');
+  setMobileNavigation(false);
 }
 
 async function init() {
@@ -180,8 +224,14 @@ $('#logout').addEventListener('click', async () => {
   try { await api('/api/v1/auth/logout', { method: 'POST' }); } catch {}
   state.csrf = '';
   state.migrationCreds = null;
+  setMobileNavigation(false);
   showLogin();
 });
+
+$('#mobile-nav-toggle').addEventListener('click', () => setMobileNavigation(!$('#sidebar').classList.contains('mobile-open')));
+$('#mobile-nav-backdrop').addEventListener('click', () => setMobileNavigation(false));
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape') setMobileNavigation(false); });
+window.addEventListener('resize', () => { if (window.innerWidth > 900) setMobileNavigation(false); });
 
 $('.sidebar').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-page]');
@@ -189,6 +239,7 @@ $('.sidebar').addEventListener('click', (e) => {
 });
 
 async function loadPage(page) {
+  setMobileNavigation(false);
   clearInterval(state.poll);
   if (page !== 'migration') state.migrationCreds = null;
   state.page = page;
@@ -968,4 +1019,5 @@ async function persistLanguage(language) {
 $('#language-select').addEventListener('change', (e) => persistLanguage(e.target.value));
 $('#login-language').addEventListener('change', async (e) => { await ZentI18n.setLanguage(e.target.value); location.reload(); });
 
+registerServiceWorker();
 init();

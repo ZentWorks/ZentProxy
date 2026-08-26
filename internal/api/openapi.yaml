@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: ZentProxy API
-  version: 0.7.12
+  version: 0.7.13
   description: Versioned API for ZentProxy proxy management, certificates, routing, analytics, trusted proxies, integrations, user preferences and migration tooling.
 servers:
   - url: /api/v1
