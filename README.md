@@ -12,6 +12,7 @@ ZentProxy is a Docker-based reverse proxy management solution with a web interfa
 
 - Central management of reverse proxy hosts
 - TLS/SSL certificate management
+- Redirect and intentional 404 hosts with optional TLS certificates and Trusted Proxy handling
 - Access rules and host configuration
 - Analytics and operational visibility
 - Integrated API for automation and integrations

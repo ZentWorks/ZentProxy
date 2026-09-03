@@ -160,6 +160,7 @@ CREATE TABLE IF NOT EXISTS redirect_hosts (
   forward_domain_name TEXT NOT NULL,
   preserve_path INTEGER NOT NULL DEFAULT 1,
   certificate_id INTEGER REFERENCES certificates(id) ON DELETE SET NULL,
+  trusted_proxy_provider_id INTEGER REFERENCES trusted_proxy_providers(id) ON DELETE SET NULL,
   ssl_forced INTEGER NOT NULL DEFAULT 0,
   http2_support INTEGER NOT NULL DEFAULT 0,
   hsts_enabled INTEGER NOT NULL DEFAULT 0,
@@ -174,6 +175,7 @@ CREATE TABLE IF NOT EXISTS dead_hosts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   domains_json TEXT NOT NULL,
   certificate_id INTEGER REFERENCES certificates(id) ON DELETE SET NULL,
+  trusted_proxy_provider_id INTEGER REFERENCES trusted_proxy_providers(id) ON DELETE SET NULL,
   ssl_forced INTEGER NOT NULL DEFAULT 0,
   http2_support INTEGER NOT NULL DEFAULT 0,
   hsts_enabled INTEGER NOT NULL DEFAULT 0,
@@ -280,6 +282,11 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_at ON audit_log(at);
 		"advanced_config": "TEXT NOT NULL DEFAULT ''", "custom_locations_json": "TEXT NOT NULL DEFAULT '[]'",
 	} {
 		if err := s.ensureColumn("hosts", name, definition); err != nil {
+			return err
+		}
+	}
+	for _, table := range []string{"redirect_hosts", "dead_hosts"} {
+		if err := s.ensureColumn(table, "trusted_proxy_provider_id", "INTEGER REFERENCES trusted_proxy_providers(id) ON DELETE SET NULL"); err != nil {
 			return err
 		}
 	}
@@ -760,7 +767,7 @@ func (s *Store) DeleteAccessList(id int64) error {
 }
 
 func (s *Store) ListRedirectHosts() ([]model.RedirectHost, error) {
-	rows, err := s.db.Query(`SELECT id,domains_json,forward_http_code,forward_scheme,forward_domain_name,preserve_path,certificate_id,ssl_forced,http2_support,hsts_enabled,hsts_subdomains,block_exploits,advanced_config,enabled,created_at,updated_at FROM redirect_hosts ORDER BY id`)
+	rows, err := s.db.Query(`SELECT id,domains_json,forward_http_code,forward_scheme,forward_domain_name,preserve_path,certificate_id,trusted_proxy_provider_id,ssl_forced,http2_support,hsts_enabled,hsts_subdomains,block_exploits,advanced_config,enabled,created_at,updated_at FROM redirect_hosts ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -779,8 +786,8 @@ func scanRedirectHost(row rowScanner) (model.RedirectHost, error) {
 	var v model.RedirectHost
 	var domains, created, updated string
 	var preserve, ssl, http2, hsts, subs, exploits, enabled int
-	var cert sql.NullInt64
-	if err := row.Scan(&v.ID, &domains, &v.ForwardHTTPCode, &v.ForwardScheme, &v.ForwardDomainName, &preserve, &cert, &ssl, &http2, &hsts, &subs, &exploits, &v.AdvancedConfig, &enabled, &created, &updated); err != nil {
+	var cert, provider sql.NullInt64
+	if err := row.Scan(&v.ID, &domains, &v.ForwardHTTPCode, &v.ForwardScheme, &v.ForwardDomainName, &preserve, &cert, &provider, &ssl, &http2, &hsts, &subs, &exploits, &v.AdvancedConfig, &enabled, &created, &updated); err != nil {
 		return v, err
 	}
 	_ = json.Unmarshal([]byte(domains), &v.Domains)
@@ -798,6 +805,10 @@ func scanRedirectHost(row rowScanner) (model.RedirectHost, error) {
 		x := cert.Int64
 		v.CertificateID = &x
 	}
+	if provider.Valid {
+		x := provider.Int64
+		v.TrustedProxyProviderID = &x
+	}
 	v.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
 	v.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
 	return v, nil
@@ -805,19 +816,19 @@ func scanRedirectHost(row rowScanner) (model.RedirectHost, error) {
 func (s *Store) CreateRedirectHost(in model.RedirectHostInput) (model.RedirectHost, error) {
 	raw, _ := json.Marshal(in.Domains)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := s.db.Exec(`INSERT INTO redirect_hosts(domains_json,forward_http_code,forward_scheme,forward_domain_name,preserve_path,certificate_id,ssl_forced,http2_support,hsts_enabled,hsts_subdomains,block_exploits,advanced_config,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, string(raw), in.ForwardHTTPCode, in.ForwardScheme, in.ForwardDomainName, btoi(in.PreservePath), nullableInt(in.CertificateID), btoi(in.SSLForced), btoi(in.HTTP2Support), btoi(in.HSTSEnabled), btoi(in.HSTSSubdomains), btoi(in.BlockExploits), in.AdvancedConfig, btoi(in.Enabled), now, now)
+	res, err := s.db.Exec(`INSERT INTO redirect_hosts(domains_json,forward_http_code,forward_scheme,forward_domain_name,preserve_path,certificate_id,trusted_proxy_provider_id,ssl_forced,http2_support,hsts_enabled,hsts_subdomains,block_exploits,advanced_config,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, string(raw), in.ForwardHTTPCode, in.ForwardScheme, in.ForwardDomainName, btoi(in.PreservePath), nullableInt(in.CertificateID), nullableInt(in.TrustedProxyProviderID), btoi(in.SSLForced), btoi(in.HTTP2Support), btoi(in.HSTSEnabled), btoi(in.HSTSSubdomains), btoi(in.BlockExploits), in.AdvancedConfig, btoi(in.Enabled), now, now)
 	if err != nil {
 		return model.RedirectHost{}, err
 	}
 	id, _ := res.LastInsertId()
-	return scanRedirectHost(s.db.QueryRow(`SELECT id,domains_json,forward_http_code,forward_scheme,forward_domain_name,preserve_path,certificate_id,ssl_forced,http2_support,hsts_enabled,hsts_subdomains,block_exploits,advanced_config,enabled,created_at,updated_at FROM redirect_hosts WHERE id=?`, id))
+	return scanRedirectHost(s.db.QueryRow(`SELECT id,domains_json,forward_http_code,forward_scheme,forward_domain_name,preserve_path,certificate_id,trusted_proxy_provider_id,ssl_forced,http2_support,hsts_enabled,hsts_subdomains,block_exploits,advanced_config,enabled,created_at,updated_at FROM redirect_hosts WHERE id=?`, id))
 }
 func (s *Store) GetRedirectHost(id int64) (model.RedirectHost, error) {
-	return scanRedirectHost(s.db.QueryRow(`SELECT id,domains_json,forward_http_code,forward_scheme,forward_domain_name,preserve_path,certificate_id,ssl_forced,http2_support,hsts_enabled,hsts_subdomains,block_exploits,advanced_config,enabled,created_at,updated_at FROM redirect_hosts WHERE id=?`, id))
+	return scanRedirectHost(s.db.QueryRow(`SELECT id,domains_json,forward_http_code,forward_scheme,forward_domain_name,preserve_path,certificate_id,trusted_proxy_provider_id,ssl_forced,http2_support,hsts_enabled,hsts_subdomains,block_exploits,advanced_config,enabled,created_at,updated_at FROM redirect_hosts WHERE id=?`, id))
 }
 func (s *Store) UpdateRedirectHost(id int64, in model.RedirectHostInput) (model.RedirectHost, error) {
 	raw, _ := json.Marshal(in.Domains)
-	res, err := s.db.Exec(`UPDATE redirect_hosts SET domains_json=?,forward_http_code=?,forward_scheme=?,forward_domain_name=?,preserve_path=?,certificate_id=?,ssl_forced=?,http2_support=?,hsts_enabled=?,hsts_subdomains=?,block_exploits=?,advanced_config=?,enabled=?,updated_at=? WHERE id=?`, string(raw), in.ForwardHTTPCode, in.ForwardScheme, in.ForwardDomainName, btoi(in.PreservePath), nullableInt(in.CertificateID), btoi(in.SSLForced), btoi(in.HTTP2Support), btoi(in.HSTSEnabled), btoi(in.HSTSSubdomains), btoi(in.BlockExploits), in.AdvancedConfig, btoi(in.Enabled), time.Now().UTC().Format(time.RFC3339Nano), id)
+	res, err := s.db.Exec(`UPDATE redirect_hosts SET domains_json=?,forward_http_code=?,forward_scheme=?,forward_domain_name=?,preserve_path=?,certificate_id=?,trusted_proxy_provider_id=?,ssl_forced=?,http2_support=?,hsts_enabled=?,hsts_subdomains=?,block_exploits=?,advanced_config=?,enabled=?,updated_at=? WHERE id=?`, string(raw), in.ForwardHTTPCode, in.ForwardScheme, in.ForwardDomainName, btoi(in.PreservePath), nullableInt(in.CertificateID), nullableInt(in.TrustedProxyProviderID), btoi(in.SSLForced), btoi(in.HTTP2Support), btoi(in.HSTSEnabled), btoi(in.HSTSSubdomains), btoi(in.BlockExploits), in.AdvancedConfig, btoi(in.Enabled), time.Now().UTC().Format(time.RFC3339Nano), id)
 	if err != nil {
 		return model.RedirectHost{}, err
 	}
@@ -833,7 +844,7 @@ func (s *Store) DeleteRedirectHost(id int64) error {
 }
 
 func (s *Store) ListDeadHosts() ([]model.DeadHost, error) {
-	rows, err := s.db.Query(`SELECT id,domains_json,certificate_id,ssl_forced,http2_support,hsts_enabled,hsts_subdomains,advanced_config,enabled,created_at,updated_at FROM dead_hosts ORDER BY id`)
+	rows, err := s.db.Query(`SELECT id,domains_json,certificate_id,trusted_proxy_provider_id,ssl_forced,http2_support,hsts_enabled,hsts_subdomains,advanced_config,enabled,created_at,updated_at FROM dead_hosts ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -852,8 +863,8 @@ func scanDeadHost(row rowScanner) (model.DeadHost, error) {
 	var v model.DeadHost
 	var domains, created, updated string
 	var ssl, http2, hsts, subs, enabled int
-	var cert sql.NullInt64
-	if err := row.Scan(&v.ID, &domains, &cert, &ssl, &http2, &hsts, &subs, &v.AdvancedConfig, &enabled, &created, &updated); err != nil {
+	var cert, provider sql.NullInt64
+	if err := row.Scan(&v.ID, &domains, &cert, &provider, &ssl, &http2, &hsts, &subs, &v.AdvancedConfig, &enabled, &created, &updated); err != nil {
 		return v, err
 	}
 	_ = json.Unmarshal([]byte(domains), &v.Domains)
@@ -863,6 +874,10 @@ func scanDeadHost(row rowScanner) (model.DeadHost, error) {
 	if cert.Valid {
 		x := cert.Int64
 		v.CertificateID = &x
+	}
+	if provider.Valid {
+		x := provider.Int64
+		v.TrustedProxyProviderID = &x
 	}
 	v.SSLForced = ssl != 0
 	v.HTTP2Support = http2 != 0
@@ -876,19 +891,19 @@ func scanDeadHost(row rowScanner) (model.DeadHost, error) {
 func (s *Store) CreateDeadHost(in model.DeadHostInput) (model.DeadHost, error) {
 	raw, _ := json.Marshal(in.Domains)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := s.db.Exec(`INSERT INTO dead_hosts(domains_json,certificate_id,ssl_forced,http2_support,hsts_enabled,hsts_subdomains,advanced_config,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, string(raw), nullableInt(in.CertificateID), btoi(in.SSLForced), btoi(in.HTTP2Support), btoi(in.HSTSEnabled), btoi(in.HSTSSubdomains), in.AdvancedConfig, btoi(in.Enabled), now, now)
+	res, err := s.db.Exec(`INSERT INTO dead_hosts(domains_json,certificate_id,trusted_proxy_provider_id,ssl_forced,http2_support,hsts_enabled,hsts_subdomains,advanced_config,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, string(raw), nullableInt(in.CertificateID), nullableInt(in.TrustedProxyProviderID), btoi(in.SSLForced), btoi(in.HTTP2Support), btoi(in.HSTSEnabled), btoi(in.HSTSSubdomains), in.AdvancedConfig, btoi(in.Enabled), now, now)
 	if err != nil {
 		return model.DeadHost{}, err
 	}
 	id, _ := res.LastInsertId()
-	return scanDeadHost(s.db.QueryRow(`SELECT id,domains_json,certificate_id,ssl_forced,http2_support,hsts_enabled,hsts_subdomains,advanced_config,enabled,created_at,updated_at FROM dead_hosts WHERE id=?`, id))
+	return scanDeadHost(s.db.QueryRow(`SELECT id,domains_json,certificate_id,trusted_proxy_provider_id,ssl_forced,http2_support,hsts_enabled,hsts_subdomains,advanced_config,enabled,created_at,updated_at FROM dead_hosts WHERE id=?`, id))
 }
 func (s *Store) GetDeadHost(id int64) (model.DeadHost, error) {
-	return scanDeadHost(s.db.QueryRow(`SELECT id,domains_json,certificate_id,ssl_forced,http2_support,hsts_enabled,hsts_subdomains,advanced_config,enabled,created_at,updated_at FROM dead_hosts WHERE id=?`, id))
+	return scanDeadHost(s.db.QueryRow(`SELECT id,domains_json,certificate_id,trusted_proxy_provider_id,ssl_forced,http2_support,hsts_enabled,hsts_subdomains,advanced_config,enabled,created_at,updated_at FROM dead_hosts WHERE id=?`, id))
 }
 func (s *Store) UpdateDeadHost(id int64, in model.DeadHostInput) (model.DeadHost, error) {
 	raw, _ := json.Marshal(in.Domains)
-	res, err := s.db.Exec(`UPDATE dead_hosts SET domains_json=?,certificate_id=?,ssl_forced=?,http2_support=?,hsts_enabled=?,hsts_subdomains=?,advanced_config=?,enabled=?,updated_at=? WHERE id=?`, string(raw), nullableInt(in.CertificateID), btoi(in.SSLForced), btoi(in.HTTP2Support), btoi(in.HSTSEnabled), btoi(in.HSTSSubdomains), in.AdvancedConfig, btoi(in.Enabled), time.Now().UTC().Format(time.RFC3339Nano), id)
+	res, err := s.db.Exec(`UPDATE dead_hosts SET domains_json=?,certificate_id=?,trusted_proxy_provider_id=?,ssl_forced=?,http2_support=?,hsts_enabled=?,hsts_subdomains=?,advanced_config=?,enabled=?,updated_at=? WHERE id=?`, string(raw), nullableInt(in.CertificateID), nullableInt(in.TrustedProxyProviderID), btoi(in.SSLForced), btoi(in.HTTP2Support), btoi(in.HSTSEnabled), btoi(in.HSTSSubdomains), in.AdvancedConfig, btoi(in.Enabled), time.Now().UTC().Format(time.RFC3339Nano), id)
 	if err != nil {
 		return model.DeadHost{}, err
 	}
@@ -1113,8 +1128,12 @@ func (s *Store) DeleteProvider(id int64) (int64, error) {
 		return 0, fmt.Errorf("built-in provider cannot be deleted")
 	}
 	var affected int64
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM hosts WHERE trusted_proxy_provider_id=?`, id).Scan(&affected); err != nil {
-		return 0, err
+	for _, table := range []string{"hosts", "redirect_hosts", "dead_hosts"} {
+		var count int64
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE trusted_proxy_provider_id=?`, id).Scan(&count); err != nil {
+			return 0, err
+		}
+		affected += count
 	}
 	if _, err := tx.Exec(`DELETE FROM trusted_proxy_providers WHERE id=?`, id); err != nil {
 		return 0, err

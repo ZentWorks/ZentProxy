@@ -444,7 +444,7 @@ $$('.dialog-tab').forEach((b)=>b.onclick=()=>setHostTab(b.dataset.hostTab));
 
 function openHost(h = null) {
   $('#host-form').reset();
-  $('#host-error').textContent = '';
+  clearDialogError($('#host-error'));
   $('#host-id').value = h?.id || '';
   $('#host-dialog-title').textContent = h ? 'Edit proxy host' : 'Add proxy host';
   setHostTab('general');
@@ -503,7 +503,7 @@ $('#host-form').addEventListener('submit', async (e) => {
     $('#host-dialog').close();
     toast(id ? 'Host updated' : 'Host created');
     await hosts();
-  } catch (err) { $('#host-error').textContent = err.message; }
+  } catch (err) { showDialogError($('#host-error'), err.message); }
 });
 $('#host-delete').onclick = async () => {
   const id = $('#host-id').value;
@@ -511,16 +511,29 @@ $('#host-delete').onclick = async () => {
   try {
     await api(`/api/v1/hosts/${id}`, { method: 'DELETE' });
     $('#host-dialog').close(); toast('Host deleted'); await hosts();
-  } catch (e) { $('#host-error').textContent = e.message; }
+  } catch (e) { showDialogError($('#host-error'), e.message); }
 };
+
+function clearDialogError(el) {
+  if (!el) return;
+  el.textContent = '';
+}
+function showDialogError(el, message) {
+  if (!el) return;
+  el.textContent = tr(String(message || 'An unexpected error occurred.'));
+  requestAnimationFrame(() => {
+    try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
+    try { el.focus({ preventScroll: true }); } catch {}
+  });
+}
 
 function openEditorDialog(title, bodyHTML, {saveLabel='Save', dangerLabel='', onSave, onDanger}={}) {
   let d=$('#resource-dialog');
   if(!d){ d=document.createElement('dialog'); d.id='resource-dialog'; document.body.appendChild(d); }
-  d.innerHTML=`<form id="resource-form" class="dialog-body" autocomplete="off"><div class="dialog-head"><div><h2>${esc(title)}</h2></div><button type="button" class="icon-btn" data-resource-close>×</button></div><div class="resource-form-body">${bodyHTML}</div><div id="resource-error" class="error-text"></div><div class="dialog-actions"><button type="button" class="btn" data-resource-close>Cancel</button>${dangerLabel?`<button type="button" id="resource-danger" class="btn danger">${esc(dangerLabel)}</button>`:''}<button type="submit" class="btn primary">${esc(saveLabel)}</button></div></form>`;
+  d.innerHTML=`<form id="resource-form" class="dialog-body" autocomplete="off"><div class="dialog-head"><div><h2>${esc(title)}</h2></div><button type="button" class="icon-btn" data-resource-close>×</button></div><div id="resource-error" class="error-text dialog-error-banner" role="alert" aria-live="assertive" tabindex="-1"></div><div class="resource-form-body">${bodyHTML}</div><div class="dialog-actions"><button type="button" class="btn" data-resource-close>Cancel</button>${dangerLabel?`<button type="button" id="resource-danger" class="btn danger">${esc(dangerLabel)}</button>`:''}<button type="submit" class="btn primary">${esc(saveLabel)}</button></div></form>`;
   d.querySelectorAll('[data-resource-close]').forEach(b=>b.onclick=()=>d.close());
-  if(dangerLabel&&onDanger) $('#resource-danger').onclick=async()=>{try{await onDanger();d.close();}catch(e){$('#resource-error').textContent=e.message}};
-  $('#resource-form').onsubmit=async(e)=>{e.preventDefault();$('#resource-error').textContent='';try{await onSave();d.close();}catch(err){$('#resource-error').textContent=err.message}};
+  if(dangerLabel&&onDanger) $('#resource-danger').onclick=async()=>{clearDialogError($('#resource-error'));try{await onDanger();d.close();}catch(e){showDialogError($('#resource-error'),e.message)}};
+  $('#resource-form').onsubmit=async(e)=>{e.preventDefault();clearDialogError($('#resource-error'));try{await onSave();d.close();}catch(err){showDialogError($('#resource-error'),err.message)}};
   applyAutocompletePolicy(d); localize(d); d.showModal(); return d;
 }
 
@@ -670,11 +683,16 @@ function requestTable(rs) {
 }
 
 async function providers() {
-  const [psRaw, hsRaw] = await Promise.all([loadProviders(), api('/api/v1/hosts')]);
-  const ps = arr(psRaw), hs = arr(hsRaw); state.hosts = hs;
+  const [psRaw, hsRaw, redirectsRaw, deadRaw] = await Promise.all([
+    loadProviders(),
+    api('/api/v1/hosts'),
+    api('/api/v1/redirect-hosts'),
+    api('/api/v1/dead-hosts'),
+  ]);
+  const ps = arr(psRaw), hs = arr(hsRaw), redirects = arr(redirectsRaw), dead = arr(deadRaw); state.hosts = hs;
   $('#top-actions').innerHTML = `<button id="add-provider" class="btn primary btn-icon">${icon('add')}<span>Add provider</span></button>`;
-  const usageCount = (id) => hs.filter(h => h.trusted_proxy_provider_id === id).length;
-  $('#content').innerHTML = `<div class="card">${sectionHeading('trusted-proxies', 'Trusted proxy providers', '<span class="muted">Define trusted proxy or CDN networks for real client IP detection. A provider only takes effect when selected on a Proxy Host.</span>')}<div class="table-wrap"><table><thead><tr><th>Provider</th><th>Client IP header</th><th>Ranges</th><th>Used by hosts</th><th>Status</th><th></th></tr></thead><tbody>${ps.map((p) => {
+  const usageCount = (id) => [...hs, ...redirects, ...dead].filter(h => h.trusted_proxy_provider_id === id).length;
+  $('#content').innerHTML = `<div class="card">${sectionHeading('trusted-proxies', 'Trusted proxy providers', '<span class="muted">Define trusted proxy or CDN networks for real client IP detection. A provider only takes effect when selected on a Proxy Host, Redirect Host or 404 Host.</span>')}<div class="table-wrap"><table><thead><tr><th>Provider</th><th>Client IP header</th><th>Ranges</th><th>Used by hosts</th><th>Status</th><th></th></tr></thead><tbody>${ps.map((p) => {
     const builtin = p.slug === 'cloudflare' || p.kind !== 'manual';
     const status = p.last_error ? `<span class="danger-text">${esc(p.last_error)}</span>` : (builtin ? '<span class="good-text">Automatically maintained</span>' : '<span class="good-text">Manual</span>');
     const actions = builtin
@@ -695,7 +713,7 @@ async function providers() {
   $$('[data-delete-provider]').forEach((b) => b.onclick = async () => {
     const p = ps.find(x => x.id === +b.dataset.deleteProvider); if (!p) return;
     const used = usageCount(p.id);
-    const message = used ? `${tr('Delete')} ${p.name}? ${used} ${tr('Proxy Host(s) will automatically switch to Direct / None.')}` : `${tr('Delete')} ${p.name}?`;
+    const message = used ? `${tr('Delete')} ${p.name}? ${used} ${tr('Assigned host(s) will automatically switch to Direct / None.')}` : `${tr('Delete')} ${p.name}?`;
     if (!confirm(message)) return;
     try { const result = await api(`/api/v1/trusted-proxy-providers/${p.id}`, {method:'DELETE'}); toast(result.hosts_reset ? `${tr('Provider deleted')} · ${result.hosts_reset} ${tr('host(s) reset to Direct / None')}` : tr('Provider deleted')); await providers(); }
     catch(e){ toast(e.message); }
@@ -708,7 +726,7 @@ function openProviderEditor(p=null) {
     <label>Name<input id="provider-name" value="${esc(p?.name||'')}" placeholder="Office reverse proxy" required></label>
     <label>Client IP header<input id="provider-header" value="${esc(p?.header||'X-Forwarded-For')}" placeholder="X-Forwarded-For" required><small>The header that contains the original client IP after traffic passed through this provider.</small></label>
     <label>Trusted IP addresses / CIDRs<textarea id="provider-cidrs" rows="9" placeholder="10.0.0.10&#10;192.168.1.0/24&#10;2001:db8::/32" required>${esc(arr(p?.cidrs).join('\n'))}</textarea><small>One IPv4/IPv6 address or CIDR per line. Individual addresses are normalized to /32 or /128.</small></label>
-    <div class="info-banner">Providers are inactive by default. Select this provider explicitly on the Proxy Hosts that should trust it.</div>`, {
+    <div class="info-banner">Providers are inactive by default. Select this provider explicitly on the Proxy Hosts, Redirect Hosts or 404 Hosts that should trust it.</div>`, {
       saveLabel: p ? 'Save changes' : 'Add provider',
       onSave: async () => {
         const body = {name: $('#provider-name').value.trim(), header: $('#provider-header').value.trim(), cidrs: $('#provider-cidrs').value.split(/\n|,/).map(x=>x.trim()).filter(Boolean)};
@@ -762,12 +780,16 @@ function parseDomains(v){return String(v||'').split(/[\n,;\s]+/).map(x=>x.trim()
 function checkbox(id,v){return `<label class="switch-row"><input id="${id}" type="checkbox" ${v?'checked':''}><span>Enabled</span></label>`}
 
 async function routingPage() {
-  const [redirectsRaw, deadRaw, streamsRaw] = await Promise.all([api('/api/v1/redirect-hosts'),api('/api/v1/dead-hosts'),api('/api/v1/streams')]);
+  const [redirectsRaw, deadRaw, streamsRaw] = await Promise.all([
+    api('/api/v1/redirect-hosts'), api('/api/v1/dead-hosts'), api('/api/v1/streams'), loadProviders(), loadCertificates(),
+  ]);
   const rs=arr(redirectsRaw), ds=arr(deadRaw), ss=arr(streamsRaw);
+  const tlsCell = (x) => x.certificate_id ? `<span class="pill good">${esc(certificateName(x.certificate_id))}</span>` : '<span class="pill">HTTP</span>';
+  const proxyCell = (x) => esc(providerName(x.trusted_proxy_provider_id));
   $('#content').innerHTML=`<div class="cards routing-metrics">${metric('redirect','Redirect hosts',fmtNum(rs.length))}${metric('dead-host','404 hosts',fmtNum(ds.length))}${metric('stream','Streams',fmtNum(ss.length))}</div>
     <div class="management-stack">
-      <div class="card"><div class="section-head"><div><h2>Redirect hosts</h2><p class="muted">HTTP redirects with optional TLS settings.</p></div><button id="add-redirect" class="btn small btn-icon">${icon('add')}<span>Add redirect</span></button></div>${rs.length?`<div class="table-wrap"><table><thead><tr><th>Domains</th><th>Target</th><th>Code</th><th>Status</th><th></th></tr></thead><tbody>${rs.map(x=>`<tr class="clickable-row" data-edit-redirect="${x.id}"><td>${arr(x.domains).map(d=>`<span class="pill">${esc(d)}</span>`).join(' ')}</td><td class="code">${esc(x.forward_scheme)}://${esc(x.forward_domain_name)}</td><td>${x.forward_http_code}</td><td>${x.enabled?'<span class="good-text">Enabled</span>':'Disabled'}</td><td class="row-chevron">›</td></tr>`).join('')}</tbody></table></div>`:emptyState('redirect','No redirect hosts.')}</div>
-      <div class="card"><div class="section-head"><div><h2>404 hosts</h2><p class="muted">Explicit hostnames that should return ZentProxy's 404 response.</p></div><button id="add-dead" class="btn small btn-icon">${icon('add')}<span>Add 404 host</span></button></div>${ds.length?`<div class="table-wrap"><table><thead><tr><th>Domains</th><th>Status</th><th></th></tr></thead><tbody>${ds.map(x=>`<tr class="clickable-row" data-edit-dead="${x.id}"><td>${arr(x.domains).map(d=>`<span class="pill">${esc(d)}</span>`).join(' ')}</td><td>${x.enabled?'<span class="good-text">Enabled</span>':'Disabled'}</td><td class="row-chevron">›</td></tr>`).join('')}</tbody></table></div>`:emptyState('dead-host','No 404 hosts.')}</div>
+      <div class="card"><div class="section-head"><div><h2>Redirect hosts</h2><p class="muted">HTTP redirects with optional TLS and trusted proxy handling.</p></div><button id="add-redirect" class="btn small btn-icon">${icon('add')}<span>Add redirect</span></button></div>${rs.length?`<div class="table-wrap"><table><thead><tr><th>Domains</th><th>Target</th><th>Code</th><th>TLS</th><th>Trusted proxy</th><th>Status</th><th></th></tr></thead><tbody>${rs.map(x=>`<tr class="clickable-row" data-edit-redirect="${x.id}"><td>${arr(x.domains).map(d=>`<span class="pill">${esc(d)}</span>`).join(' ')}</td><td class="code">${esc(x.forward_scheme)}://${esc(x.forward_domain_name)}</td><td>${x.forward_http_code}</td><td>${tlsCell(x)}</td><td>${proxyCell(x)}</td><td>${x.enabled?'<span class="good-text">Enabled</span>':'Disabled'}</td><td class="row-chevron">›</td></tr>`).join('')}</tbody></table></div>`:emptyState('redirect','No redirect hosts.')}</div>
+      <div class="card"><div class="section-head"><div><h2>404 hosts</h2><p class="muted">Explicit hostnames that should return ZentProxy's 404 response, including HTTPS when a certificate is selected.</p></div><button id="add-dead" class="btn small btn-icon">${icon('add')}<span>Add 404 host</span></button></div>${ds.length?`<div class="table-wrap"><table><thead><tr><th>Domains</th><th>TLS</th><th>Trusted proxy</th><th>Status</th><th></th></tr></thead><tbody>${ds.map(x=>`<tr class="clickable-row" data-edit-dead="${x.id}"><td>${arr(x.domains).map(d=>`<span class="pill">${esc(d)}</span>`).join(' ')}</td><td>${tlsCell(x)}</td><td>${proxyCell(x)}</td><td>${x.enabled?'<span class="good-text">Enabled</span>':'Disabled'}</td><td class="row-chevron">›</td></tr>`).join('')}</tbody></table></div>`:emptyState('dead-host','No 404 hosts.')}</div>
       <div class="card"><div class="section-head"><div><h2>Streams</h2><p class="muted">TCP/UDP forwarding. Docker or Unraid must also publish the incoming port.</p></div><button id="add-stream" class="btn small btn-icon">${icon('add')}<span>Add stream</span></button></div>${ss.length?`<div class="table-wrap"><table><thead><tr><th>Incoming</th><th>Target</th><th>Protocol</th><th>Status</th><th></th></tr></thead><tbody>${ss.map(x=>`<tr class="clickable-row" data-edit-stream="${x.id}"><td class="code">:${num(x.incoming_port)}</td><td class="code">${esc(x.forward_host)}:${num(x.forward_port)}</td><td>${x.tcp_forwarding?'TCP ':''}${x.udp_forwarding?'UDP':''}</td><td>${x.enabled?'<span class="good-text">Enabled</span>':'Disabled'}</td><td class="row-chevron">›</td></tr>`).join('')}</tbody></table></div>`:emptyState('stream','No streams.')}</div>
     </div>`;
   $('#add-redirect').onclick=()=>openRedirectEditor(); $('#add-dead').onclick=()=>openDeadEditor(); $('#add-stream').onclick=()=>openStreamEditor();
@@ -775,8 +797,43 @@ async function routingPage() {
   $$('[data-edit-dead]').forEach(r=>r.onclick=()=>openDeadEditor(ds.find(x=>x.id===+r.dataset.editDead)));
   $$('[data-edit-stream]').forEach(r=>r.onclick=()=>openStreamEditor(ss.find(x=>x.id===+r.dataset.editStream)));
 }
-function openRedirectEditor(x=null){const v=x||{domains:[],forward_http_code:301,forward_scheme:'https',forward_domain_name:'',preserve_path:true,certificate_id:null,ssl_forced:false,http2_support:false,hsts_enabled:false,hsts_subdomains:false,block_exploits:false,advanced_config:'',enabled:true};openEditorDialog(x?'Edit redirect host':'Add redirect host',`<label>Domains<textarea id="route-domains" rows="3" placeholder="old.example.com" required>${esc(domainsText(v.domains))}</textarea></label><div class="form-grid"><label>Target scheme<select id="route-scheme"><option value="auto" ${v.forward_scheme==='auto'?'selected':''}>auto</option><option value="https" ${v.forward_scheme==='https'?'selected':''}>https</option><option value="http" ${v.forward_scheme==='http'?'selected':''}>http</option></select></label><label>Target domain<input id="route-target" value="${esc(v.forward_domain_name)}" required></label><label>HTTP code<select id="route-code">${[301,302,307,308].map(n=>`<option ${v.forward_http_code===n?'selected':''}>${n}</option>`).join('')}</select></label></div><div class="switch-grid"><label class="switch-row"><input id="route-preserve" type="checkbox" ${v.preserve_path?'checked':''}><span>Preserve path</span></label>${checkbox('route-enabled',v.enabled)}</div>`,{dangerLabel:x?'Delete':'',onDanger:x?async()=>{if(!confirmT('Delete this redirect host?'))throw new Error(tr('Cancelled'));await api(`/api/v1/redirect-hosts/${x.id}`,{method:'DELETE'});toast('Redirect deleted');await routingPage()}:null,onSave:async()=>{const body={domains:parseDomains($('#route-domains').value),forward_http_code:+$('#route-code').value,forward_scheme:$('#route-scheme').value,forward_domain_name:$('#route-target').value.trim(),preserve_path:$('#route-preserve').checked,certificate_id:v.certificate_id??null,ssl_forced:!!v.ssl_forced,http2_support:!!v.http2_support,hsts_enabled:!!v.hsts_enabled,hsts_subdomains:!!v.hsts_subdomains,block_exploits:!!v.block_exploits,advanced_config:v.advanced_config||'',enabled:$('#route-enabled').checked};await api(x?`/api/v1/redirect-hosts/${x.id}`:'/api/v1/redirect-hosts',{method:x?'PUT':'POST',body:JSON.stringify(body)});toast(x?'Redirect updated':'Redirect created');await routingPage();}})}
-function openDeadEditor(x=null){const v=x||{domains:[],certificate_id:null,ssl_forced:false,http2_support:false,hsts_enabled:false,hsts_subdomains:false,advanced_config:'',enabled:true};openEditorDialog(x?'Edit 404 host':'Add 404 host',`<label>Domains<textarea id="dead-domains" rows="4" placeholder="unused.example.com" required>${esc(domainsText(v.domains))}</textarea></label>${checkbox('dead-enabled',v.enabled)}`,{dangerLabel:x?'Delete':'',onDanger:x?async()=>{if(!confirmT('Delete this 404 host?'))throw new Error(tr('Cancelled'));await api(`/api/v1/dead-hosts/${x.id}`,{method:'DELETE'});toast('404 host deleted');await routingPage()}:null,onSave:async()=>{const body={domains:parseDomains($('#dead-domains').value),certificate_id:v.certificate_id??null,ssl_forced:!!v.ssl_forced,http2_support:!!v.http2_support,hsts_enabled:!!v.hsts_enabled,hsts_subdomains:!!v.hsts_subdomains,advanced_config:v.advanced_config||'',enabled:$('#dead-enabled').checked};await api(x?`/api/v1/dead-hosts/${x.id}`:'/api/v1/dead-hosts',{method:x?'PUT':'POST',body:JSON.stringify(body)});toast(x?'404 host updated':'404 host created');await routingPage();}})}
+function routingCertificateOptions(selected) {
+  return '<option value="">None / HTTP only</option>' + state.certificates.map((c)=>`<option value="${c.id}" ${c.id===selected?'selected':''}>${esc(c.name)} · ${esc(c.provider)}</option>`).join('');
+}
+function routingProviderOptions(selected) {
+  return '<option value="">Direct / None</option>' + state.providers.map((p)=>`<option value="${p.id}" ${p.id===selected?'selected':''}>${esc(p.name)}</option>`).join('');
+}
+function syncRoutingTLS(prefix) {
+  const cert=$(`#${prefix}-certificate`), enabled=!!cert?.value;
+  for (const suffix of ['ssl','http2','hsts','hsts-subdomains']) {
+    const input=$(`#${prefix}-${suffix}`); if (input) input.disabled=!enabled;
+  }
+}
+function openRedirectEditor(x=null){
+  const v=x||{domains:[],forward_http_code:301,forward_scheme:'https',forward_domain_name:'',preserve_path:true,certificate_id:null,trusted_proxy_provider_id:null,ssl_forced:false,http2_support:true,hsts_enabled:false,hsts_subdomains:false,block_exploits:false,advanced_config:'',enabled:true};
+  const d=openEditorDialog(x?'Edit redirect host':'Add redirect host',`
+    <label>Domains<textarea id="route-domains" rows="3" placeholder="old.example.com" required>${esc(domainsText(v.domains))}</textarea></label>
+    <div class="form-grid"><label>Target scheme<select id="route-scheme"><option value="auto" ${v.forward_scheme==='auto'?'selected':''}>auto</option><option value="https" ${v.forward_scheme==='https'?'selected':''}>https</option><option value="http" ${v.forward_scheme==='http'?'selected':''}>http</option></select></label><label>Target domain<input id="route-target" value="${esc(v.forward_domain_name)}" required></label><label>HTTP code<select id="route-code">${[301,302,307,308].map(n=>`<option ${v.forward_http_code===n?'selected':''}>${n}</option>`).join('')}</select></label></div>
+    <div class="form-grid"><label>TLS certificate<select id="route-certificate">${routingCertificateOptions(v.certificate_id)}</select><small>The certificate terminates HTTPS on the source domain before the redirect is sent.</small></label><label>Trusted proxy<select id="route-provider">${routingProviderOptions(v.trusted_proxy_provider_id)}</select><small>Use this when the redirect domain is reached through Cloudflare or another trusted proxy.</small></label></div>
+    <div class="switch-grid"><label class="switch-row"><input id="route-preserve" type="checkbox" ${v.preserve_path?'checked':''}><span>Preserve path</span></label>${checkbox('route-enabled',v.enabled)}<label class="switch-row"><input id="route-ssl" type="checkbox" ${v.ssl_forced?'checked':''}><span>Force HTTPS</span></label><label class="switch-row"><input id="route-http2" type="checkbox" ${v.http2_support?'checked':''}><span>HTTP/2</span></label><label class="switch-row"><input id="route-hsts" type="checkbox" ${v.hsts_enabled?'checked':''}><span>HSTS</span></label><label class="switch-row"><input id="route-hsts-subdomains" type="checkbox" ${v.hsts_subdomains?'checked':''}><span>HSTS subdomains</span></label><label class="switch-row"><input id="route-exploits" type="checkbox" ${v.block_exploits?'checked':''}><span>Common exploit filter</span></label></div>`,{
+      dangerLabel:x?'Delete':'',
+      onDanger:x?async()=>{if(!confirmT('Delete this redirect host?'))throw new Error(tr('Cancelled'));await api(`/api/v1/redirect-hosts/${x.id}`,{method:'DELETE'});toast('Redirect deleted');await routingPage()}:null,
+      onSave:async()=>{const cid=$('#route-certificate').value,pid=$('#route-provider').value,hasCert=!!cid;const body={domains:parseDomains($('#route-domains').value),forward_http_code:+$('#route-code').value,forward_scheme:$('#route-scheme').value,forward_domain_name:$('#route-target').value.trim(),preserve_path:$('#route-preserve').checked,certificate_id:cid?+cid:null,trusted_proxy_provider_id:pid?+pid:null,ssl_forced:hasCert&&$('#route-ssl').checked,http2_support:hasCert&&$('#route-http2').checked,hsts_enabled:hasCert&&$('#route-hsts').checked,hsts_subdomains:hasCert&&$('#route-hsts-subdomains').checked,block_exploits:$('#route-exploits').checked,advanced_config:v.advanced_config||'',enabled:$('#route-enabled').checked};await api(x?`/api/v1/redirect-hosts/${x.id}`:'/api/v1/redirect-hosts',{method:x?'PUT':'POST',body:JSON.stringify(body)});toast(x?'Redirect updated':'Redirect created');await routingPage();}
+    });
+  $('#route-certificate').onchange=()=>syncRoutingTLS('route'); syncRoutingTLS('route'); return d;
+}
+function openDeadEditor(x=null){
+  const v=x||{domains:[],certificate_id:null,trusted_proxy_provider_id:null,ssl_forced:false,http2_support:true,hsts_enabled:false,hsts_subdomains:false,advanced_config:'',enabled:true};
+  const d=openEditorDialog(x?'Edit 404 host':'Add 404 host',`
+    <label>Domains<textarea id="dead-domains" rows="4" placeholder="unused.example.com" required>${esc(domainsText(v.domains))}</textarea></label>
+    <div class="form-grid"><label>TLS certificate<select id="dead-certificate">${routingCertificateOptions(v.certificate_id)}</select><small>Select a certificate so HTTPS requests can complete TLS and receive the intended 404 response.</small></label><label>Trusted proxy<select id="dead-provider">${routingProviderOptions(v.trusted_proxy_provider_id)}</select><small>Use this when the 404 domain is reached through Cloudflare or another trusted proxy.</small></label></div>
+    <div class="switch-grid">${checkbox('dead-enabled',v.enabled)}<label class="switch-row"><input id="dead-ssl" type="checkbox" ${v.ssl_forced?'checked':''}><span>Force HTTPS</span></label><label class="switch-row"><input id="dead-http2" type="checkbox" ${v.http2_support?'checked':''}><span>HTTP/2</span></label><label class="switch-row"><input id="dead-hsts" type="checkbox" ${v.hsts_enabled?'checked':''}><span>HSTS</span></label><label class="switch-row"><input id="dead-hsts-subdomains" type="checkbox" ${v.hsts_subdomains?'checked':''}><span>HSTS subdomains</span></label></div>`,{
+      dangerLabel:x?'Delete':'',
+      onDanger:x?async()=>{if(!confirmT('Delete this 404 host?'))throw new Error(tr('Cancelled'));await api(`/api/v1/dead-hosts/${x.id}`,{method:'DELETE'});toast('404 host deleted');await routingPage()}:null,
+      onSave:async()=>{const cid=$('#dead-certificate').value,pid=$('#dead-provider').value,hasCert=!!cid;const body={domains:parseDomains($('#dead-domains').value),certificate_id:cid?+cid:null,trusted_proxy_provider_id:pid?+pid:null,ssl_forced:hasCert&&$('#dead-ssl').checked,http2_support:hasCert&&$('#dead-http2').checked,hsts_enabled:hasCert&&$('#dead-hsts').checked,hsts_subdomains:hasCert&&$('#dead-hsts-subdomains').checked,advanced_config:v.advanced_config||'',enabled:$('#dead-enabled').checked};await api(x?`/api/v1/dead-hosts/${x.id}`:'/api/v1/dead-hosts',{method:x?'PUT':'POST',body:JSON.stringify(body)});toast(x?'404 host updated':'404 host created');await routingPage();}
+    });
+  $('#dead-certificate').onchange=()=>syncRoutingTLS('dead'); syncRoutingTLS('dead'); return d;
+}
 function openStreamEditor(x=null){const v=x||{incoming_port:0,forward_host:'',forward_port:0,tcp_forwarding:true,udp_forwarding:false,certificate_id:null,enabled:true};openEditorDialog(x?'Edit stream':'Add stream',`<div class="form-grid"><label>Incoming port<input id="stream-in" type="number" min="1" max="65535" value="${num(v.incoming_port)||''}" required></label><label>Forward host<input id="stream-host" value="${esc(v.forward_host)}" required></label><label>Forward port<input id="stream-port" type="number" min="1" max="65535" value="${num(v.forward_port)||''}" required></label></div><div class="switch-grid"><label class="switch-row"><input id="stream-tcp" type="checkbox" ${v.tcp_forwarding?'checked':''}><span>TCP</span></label><label class="switch-row"><input id="stream-udp" type="checkbox" ${v.udp_forwarding?'checked':''}><span>UDP</span></label>${checkbox('stream-enabled',v.enabled)}</div>`,{dangerLabel:x?'Delete':'',onDanger:x?async()=>{if(!confirmT('Delete this stream?'))throw new Error(tr('Cancelled'));await api(`/api/v1/streams/${x.id}`,{method:'DELETE'});toast('Stream deleted');await routingPage()}:null,onSave:async()=>{const body={incoming_port:+$('#stream-in').value,forward_host:$('#stream-host').value.trim(),forward_port:+$('#stream-port').value,tcp_forwarding:$('#stream-tcp').checked,udp_forwarding:$('#stream-udp').checked,certificate_id:v.certificate_id??null,enabled:$('#stream-enabled').checked};await api(x?`/api/v1/streams/${x.id}`:'/api/v1/streams',{method:x?'PUT':'POST',body:JSON.stringify(body)});toast(x?'Stream updated':'Stream created');await routingPage();}})}
 
 async function accessListsPage(){
@@ -824,7 +881,7 @@ async function openAccessListEditor(x=null){
     });
   const credentials=$('#access-credentials');
   credentials.querySelectorAll('.credential-remove').forEach(btn=>btn.onclick=()=>{const row=btn.closest('.credential-row');row.dataset.remove='1';row.classList.add('hidden')});
-  $('#access-add-user').onclick=()=>{const user=$('#access-new-user').value.trim(),pass=$('#access-new-pass').value;if(!user)return $('#resource-error').textContent=tr('Enter a username.');if(pass.length<8)return $('#resource-error').textContent=tr('Password must be at least 8 characters.');if(Array.from($$('.credential-row')).some(r=>(r.dataset.existingUser||r.dataset.newUser)===user&&!r.dataset.remove))return $('#resource-error').textContent=tr('This username already exists.');const row=document.createElement('div');row.className='credential-row';row.dataset.newUser=user;row.dataset.password=pass;row.innerHTML=`<div class="credential-user">${esc(user)}</div><div class="muted">New credential</div><button type="button" class="btn small danger credential-remove">Remove</button>`;row.querySelector('.credential-remove').onclick=()=>row.remove();credentials.appendChild(row);$('#access-new-user').value='';$('#access-new-pass').value='';$('#resource-error').textContent='';};
+  $('#access-add-user').onclick=()=>{const user=$('#access-new-user').value.trim(),pass=$('#access-new-pass').value;if(!user){showDialogError($('#resource-error'),'Enter a username.');return;}if(pass.length<8){showDialogError($('#resource-error'),'Password must be at least 8 characters.');return;}if(Array.from($$('.credential-row')).some(r=>(r.dataset.existingUser||r.dataset.newUser)===user&&!r.dataset.remove)){showDialogError($('#resource-error'),'This username already exists.');return;}const row=document.createElement('div');row.className='credential-row';row.dataset.newUser=user;row.dataset.password=pass;row.innerHTML=`<div class="credential-user">${esc(user)}</div><div class="muted">New credential</div><button type="button" class="btn small danger credential-remove">Remove</button>`;row.querySelector('.credential-remove').onclick=()=>row.remove();credentials.appendChild(row);$('#access-new-user').value='';$('#access-new-pass').value='';clearDialogError($('#resource-error'));};
   return d;
 }
 

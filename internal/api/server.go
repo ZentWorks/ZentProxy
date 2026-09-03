@@ -812,6 +812,17 @@ func (s *Server) accessListDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
+func (s *Server) validateTrustedProxyProviderID(w http.ResponseWriter, id *int64) bool {
+	if id == nil {
+		return true
+	}
+	if _, err := s.store.GetProvider(*id); err != nil {
+		jsonError(w, 422, "trusted proxy provider does not exist")
+		return false
+	}
+	return true
+}
+
 func (s *Server) redirectHostsList(w http.ResponseWriter, r *http.Request) {
 	v, err := s.store.ListRedirectHosts()
 	if err != nil {
@@ -839,6 +850,9 @@ func (s *Server) redirectHostCreate(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, 422, "certificate does not exist")
 			return
 		}
+	}
+	if !s.validateTrustedProxyProviderID(w, in.TrustedProxyProviderID) {
+		return
 	}
 	v, err := s.store.CreateRedirectHost(in)
 	if err != nil {
@@ -887,13 +901,16 @@ func (s *Server) redirectHostUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if !s.validateTrustedProxyProviderID(w, in.TrustedProxyProviderID) {
+		return
+	}
 	v, err := s.store.UpdateRedirectHost(id, in)
 	if err != nil {
 		jsonError(w, 500, "cannot update redirect host")
 		return
 	}
 	if err := s.proxy.Apply(); err != nil {
-		_, _ = s.store.UpdateRedirectHost(id, model.RedirectHostInput{Domains: old.Domains, ForwardHTTPCode: old.ForwardHTTPCode, ForwardScheme: old.ForwardScheme, ForwardDomainName: old.ForwardDomainName, PreservePath: old.PreservePath, CertificateID: old.CertificateID, SSLForced: old.SSLForced, HTTP2Support: old.HTTP2Support, HSTSEnabled: old.HSTSEnabled, HSTSSubdomains: old.HSTSSubdomains, BlockExploits: old.BlockExploits, AdvancedConfig: old.AdvancedConfig, Enabled: old.Enabled})
+		_, _ = s.store.UpdateRedirectHost(id, model.RedirectHostInput{Domains: old.Domains, ForwardHTTPCode: old.ForwardHTTPCode, ForwardScheme: old.ForwardScheme, ForwardDomainName: old.ForwardDomainName, PreservePath: old.PreservePath, CertificateID: old.CertificateID, TrustedProxyProviderID: old.TrustedProxyProviderID, SSLForced: old.SSLForced, HTTP2Support: old.HTTP2Support, HSTSEnabled: old.HSTSEnabled, HSTSSubdomains: old.HSTSSubdomains, BlockExploits: old.BlockExploits, AdvancedConfig: old.AdvancedConfig, Enabled: old.Enabled})
 		_ = s.proxy.Apply()
 		jsonError(w, 500, "proxy activation failed: "+err.Error())
 		return
@@ -942,6 +959,9 @@ func (s *Server) deadHostCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if !s.validateTrustedProxyProviderID(w, in.TrustedProxyProviderID) {
+		return
+	}
 	v, err := s.store.CreateDeadHost(in)
 	if err != nil {
 		jsonError(w, 500, "cannot create 404 host")
@@ -985,13 +1005,16 @@ func (s *Server) deadHostUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if !s.validateTrustedProxyProviderID(w, in.TrustedProxyProviderID) {
+		return
+	}
 	v, err := s.store.UpdateDeadHost(id, in)
 	if err != nil {
 		jsonError(w, 500, "cannot update 404 host")
 		return
 	}
 	if err := s.proxy.Apply(); err != nil {
-		_, _ = s.store.UpdateDeadHost(id, model.DeadHostInput{Domains: old.Domains, CertificateID: old.CertificateID, SSLForced: old.SSLForced, HTTP2Support: old.HTTP2Support, HSTSEnabled: old.HSTSEnabled, HSTSSubdomains: old.HSTSSubdomains, AdvancedConfig: old.AdvancedConfig, Enabled: old.Enabled})
+		_, _ = s.store.UpdateDeadHost(id, model.DeadHostInput{Domains: old.Domains, CertificateID: old.CertificateID, TrustedProxyProviderID: old.TrustedProxyProviderID, SSLForced: old.SSLForced, HTTP2Support: old.HTTP2Support, HSTSEnabled: old.HSTSEnabled, HSTSSubdomains: old.HSTSSubdomains, AdvancedConfig: old.AdvancedConfig, Enabled: old.Enabled})
 		_ = s.proxy.Apply()
 		jsonError(w, 500, "proxy activation failed: "+err.Error())
 		return

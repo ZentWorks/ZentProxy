@@ -99,3 +99,17 @@ html,body{min-height:100%;max-width:100%;overflow-x:hidden}.mobile-nav-toggle,.m
 }
 
 @media(prefers-reduced-motion:reduce){.sidebar{transition:none}}
+
+/* 0.7.14 modal validation visibility */
+.dialog-error-banner:empty{display:none}.dialog-error-banner:not(:empty){display:block;margin:12px 0 4px;padding:11px 13px;border:1px solid #7a3340;border-left:4px solid #fb7185;border-radius:10px;background:#2a151b;color:#fecdd3;font-weight:650;line-height:1.45;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+
+/* 0.7.14 fixed desktop/tablet sidebar: the full right pane scrolls at the browser edge */
+@media(min-width:901px){
+  .shell{height:100dvh;min-height:0;overflow:hidden}
+  .sidebar{position:relative;top:auto;height:100dvh;min-height:0;overflow:hidden}
+  .sidebar>nav{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-right:4px;scrollbar-gutter:stable}
+  .sidebar-bottom{flex:0 0 auto}
+  .shell>main{display:block;height:100dvh;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:contain;scrollbar-gutter:stable}
+  .topbar{position:sticky;top:0;z-index:4}
+  .content{width:100%;overflow:visible}
+}

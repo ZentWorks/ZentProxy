@@ -577,6 +577,30 @@ __ZP_ROOT_DOMAINS__    }
 			cloudflareDomains[domain] = true
 		}
 	}
+	for _, host := range redirects {
+		if !host.Enabled || host.TrustedProxyProviderID == nil {
+			continue
+		}
+		p, ok := providers[*host.TrustedProxyProviderID]
+		if !ok || !strings.EqualFold(strings.TrimSpace(p.Header), "CF-Connecting-IP") {
+			continue
+		}
+		for _, domain := range host.Domains {
+			cloudflareDomains[domain] = true
+		}
+	}
+	for _, host := range deadHosts {
+		if !host.Enabled || host.TrustedProxyProviderID == nil {
+			continue
+		}
+		p, ok := providers[*host.TrustedProxyProviderID]
+		if !ok || !strings.EqualFold(strings.TrimSpace(p.Header), "CF-Connecting-IP") {
+			continue
+		}
+		for _, domain := range host.Domains {
+			cloudflareDomains[domain] = true
+		}
+	}
 	var cloudflareLines strings.Builder
 	cloudflareNames := make([]string, 0, len(cloudflareDomains))
 	for domain := range cloudflareDomains {
@@ -688,13 +712,13 @@ __ZP_ROOT_DOMAINS__    }
 		if !h.Enabled {
 			continue
 		}
-		b.WriteString(renderRedirectHost(h, certificates, m.dataDir))
+		b.WriteString(renderRedirectHost(h, providers, certificates, m.dataDir, trustedTransportHops))
 	}
 	for _, h := range deadHosts {
 		if !h.Enabled {
 			continue
 		}
-		b.WriteString(renderDeadHost(h, certificates, m.dataDir))
+		b.WriteString(renderDeadHost(h, providers, certificates, m.dataDir, trustedTransportHops))
 	}
 	b.WriteString("}\n")
 	if len(streams) > 0 {
@@ -757,23 +781,10 @@ func renderHostServer(h model.Host, accessLists map[int64]model.AccessList, prov
 		b.WriteString("        location / { return 301 https://$host$request_uri; }\n    }\n\n")
 		return b.String()
 	}
-	if h.TrustedProxyProviderID != nil {
-		if p, ok := providers[*h.TrustedProxyProviderID]; ok {
-			for _, cidr := range p.CIDRs {
-				fmt.Fprintf(&b, "        set_real_ip_from %s;\n", cidr)
-			}
-			// A container runtime may SNAT published-port traffic before OpenResty,
-			// making the immediate peer a local gateway (for example Docker Desktop).
-			// Trust only detected/explicit exact transport hops, and only when this
-			// host explicitly selected a trusted proxy provider.
-			for _, cidr := range trustedTransportHops {
-				fmt.Fprintf(&b, "        set_real_ip_from %s;\n", cidr)
-			}
-			if p.Header != "" {
-				fmt.Fprintf(&b, "        real_ip_header %s;\n        real_ip_recursive on;\n", p.Header)
-			}
-		}
-	}
+	// A container runtime may SNAT published-port traffic before OpenResty.
+	// Managed trusted-proxy directives are emitted only when this host explicitly
+	// selects a provider.
+	b.WriteString(renderTrustedProxyDirectives(h.TrustedProxyProviderID, providers, trustedTransportHops, "        "))
 	if zentLoop.Enabled {
 		routeCIDRs, blockCIDRs, routeExact, routePrefix, blockExact, blockPrefix := zentLoopRulesForHost(zentLoop, h.ID)
 		if len(routeCIDRs)+len(routeExact)+len(routePrefix) > 0 {
@@ -1002,7 +1013,28 @@ func validAccessAddress(v string) bool {
 	return hostnameRE.MatchString(v)
 }
 
-func renderRedirectHost(h model.RedirectHost, certificates map[int64]model.Certificate, dataDir string) string {
+func renderTrustedProxyDirectives(providerID *int64, providers map[int64]model.TrustedProxyProvider, trustedTransportHops []string, indent string) string {
+	if providerID == nil {
+		return ""
+	}
+	p, ok := providers[*providerID]
+	if !ok {
+		return ""
+	}
+	var b strings.Builder
+	for _, cidr := range p.CIDRs {
+		fmt.Fprintf(&b, "%sset_real_ip_from %s;\n", indent, cidr)
+	}
+	for _, cidr := range trustedTransportHops {
+		fmt.Fprintf(&b, "%sset_real_ip_from %s;\n", indent, cidr)
+	}
+	if p.Header != "" {
+		fmt.Fprintf(&b, "%sreal_ip_header %s;\n%sreal_ip_recursive on;\n", indent, p.Header, indent)
+	}
+	return b.String()
+}
+
+func renderRedirectHost(h model.RedirectHost, providers map[int64]model.TrustedProxyProvider, certificates map[int64]model.Certificate, dataDir string, trustedTransportHops []string) string {
 	var cert *model.Certificate
 	if h.CertificateID != nil {
 		if c, ok := certificates[*h.CertificateID]; ok {
@@ -1010,14 +1042,14 @@ func renderRedirectHost(h model.RedirectHost, certificates map[int64]model.Certi
 		}
 	}
 	var b strings.Builder
-	b.WriteString(renderRedirectServer(h, dataDir, false, cert))
+	b.WriteString(renderRedirectServer(h, providers, dataDir, false, cert, trustedTransportHops))
 	if cert != nil && cert.CertPath != "" && cert.KeyPath != "" {
-		b.WriteString(renderRedirectServer(h, dataDir, true, cert))
+		b.WriteString(renderRedirectServer(h, providers, dataDir, true, cert, trustedTransportHops))
 	}
 	return b.String()
 }
 
-func renderRedirectServer(h model.RedirectHost, dataDir string, tlsEnabled bool, cert *model.Certificate) string {
+func renderRedirectServer(h model.RedirectHost, providers map[int64]model.TrustedProxyProvider, dataDir string, tlsEnabled bool, cert *model.Certificate, trustedTransportHops []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "    # redirect:%d\n    server {\n", h.ID)
 	if tlsEnabled {
@@ -1038,6 +1070,7 @@ func renderRedirectServer(h model.RedirectHost, dataDir string, tlsEnabled bool,
 	}
 	fmt.Fprintf(&b, "        server_name %s;\n", strings.Join(h.Domains, " "))
 	b.WriteString("        location ^~ /.well-known/acme-challenge/ { root " + nginxQuote(dataDir) + "/acme-webroot; try_files $uri =404; access_log off; }\n")
+	b.WriteString(renderTrustedProxyDirectives(h.TrustedProxyProviderID, providers, trustedTransportHops, "        "))
 	if !tlsEnabled && h.SSLForced && cert != nil {
 		b.WriteString("        location / { return 301 https://$host$request_uri; }\n    }\n\n")
 		return b.String()
@@ -1045,8 +1078,12 @@ func renderRedirectServer(h model.RedirectHost, dataDir string, tlsEnabled bool,
 	if h.BlockExploits {
 		b.WriteString("        location ~* ^/(?:\\.git|\\.svn|\\.hg)(?:/|$) { return 404; }\n")
 	}
-	if strings.TrimSpace(h.AdvancedConfig) != "" {
-		b.WriteString(indentConfig(h.AdvancedConfig, "        "))
+	advancedConfig := h.AdvancedConfig
+	if h.TrustedProxyProviderID != nil {
+		advancedConfig = stripManagedRealIPDirectives(advancedConfig)
+	}
+	if strings.TrimSpace(advancedConfig) != "" {
+		b.WriteString(indentConfig(advancedConfig, "        "))
 	}
 	scheme := strings.ToLower(strings.TrimSpace(h.ForwardScheme))
 	if scheme != "http" && scheme != "https" {
@@ -1060,7 +1097,7 @@ func renderRedirectServer(h model.RedirectHost, dataDir string, tlsEnabled bool,
 	return b.String()
 }
 
-func renderDeadHost(h model.DeadHost, certificates map[int64]model.Certificate, dataDir string) string {
+func renderDeadHost(h model.DeadHost, providers map[int64]model.TrustedProxyProvider, certificates map[int64]model.Certificate, dataDir string, trustedTransportHops []string) string {
 	var cert *model.Certificate
 	if h.CertificateID != nil {
 		if c, ok := certificates[*h.CertificateID]; ok {
@@ -1091,12 +1128,17 @@ func renderDeadHost(h model.DeadHost, certificates map[int64]model.Certificate, 
 		}
 		fmt.Fprintf(&b, "        server_name %s;\n", strings.Join(h.Domains, " "))
 		b.WriteString("        location ^~ /.well-known/acme-challenge/ { root " + nginxQuote(dataDir) + "/acme-webroot; try_files $uri =404; access_log off; }\n")
+		b.WriteString(renderTrustedProxyDirectives(h.TrustedProxyProviderID, providers, trustedTransportHops, "        "))
 		if !tlsEnabled && h.SSLForced && cert != nil {
 			b.WriteString("        location / { return 301 https://$host$request_uri; }\n    }\n\n")
 			continue
 		}
-		if strings.TrimSpace(h.AdvancedConfig) != "" {
-			b.WriteString(indentConfig(h.AdvancedConfig, "        "))
+		advancedConfig := h.AdvancedConfig
+		if h.TrustedProxyProviderID != nil {
+			advancedConfig = stripManagedRealIPDirectives(advancedConfig)
+		}
+		if strings.TrimSpace(advancedConfig) != "" {
+			b.WriteString(indentConfig(advancedConfig, "        "))
 		}
 		b.WriteString("        location / { return 404; }\n    }\n\n")
 	}

@@ -74,6 +74,7 @@
 <dialog id="host-dialog">
   <form id="host-form" method="dialog" class="dialog-body" autocomplete="off">
     <div class="dialog-head"><div><h2 id="host-dialog-title">Add proxy host</h2><p class="muted">Simple by default. The useful switches are right here.</p></div><button class="icon-btn" value="cancel" type="button" data-close-dialog>×</button></div>
+    <div id="host-error" class="error-text dialog-error-banner" role="alert" aria-live="assertive" tabindex="-1"></div>
     <input id="host-id" type="hidden">
     <div class="dialog-tabs" role="tablist">
       <button type="button" class="dialog-tab active" data-host-tab="general">General</button>
@@ -128,7 +129,6 @@
     <section class="host-tab-panel" data-host-panel="advanced">
       <label>Advanced OpenResty configuration<textarea id="host-advanced" autocomplete="off" rows="9" placeholder="# Optional server-level directives"></textarea><small>Imported advanced directives are preserved here. Use only if you know the OpenResty syntax.</small></label>
     </section>
-    <div id="host-error" class="error-text"></div>
     <div class="dialog-actions"><button type="button" class="btn" data-close-dialog>Cancel</button><button id="host-delete" type="button" class="btn danger hidden">Delete</button><button type="submit" class="btn primary">Save host</button></div>
   </form>
 </dialog>

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: ZentProxy API
-  version: 0.7.13
+  version: 0.7.14
   description: Versioned API for ZentProxy proxy management, certificates, routing, analytics, trusted proxies, integrations, user preferences and migration tooling.
 servers:
   - url: /api/v1
@@ -71,7 +71,8 @@ components:
         trusted_proxy_provider_id: { type: [integer, 'null'] }
         access_list_id: { type: [integer, 'null'] }
         block_common_exploits: { type: boolean }
-        certificate_id: { type: [integer, 'null'] }
+        certificate_id: { type: [integer, 'null'], description: Optional certificate used to terminate HTTPS on the redirect source domain }
+        trusted_proxy_provider_id: { type: [integer, 'null'], description: Optional trusted proxy provider used to restore the real client IP }
         ssl_forced: { type: boolean }
         http2_support: { type: boolean }
         hsts_enabled: { type: boolean }
@@ -190,7 +191,8 @@ components:
         forward_scheme: { type: string, enum: [auto, http, https] }
         forward_domain_name: { type: string }
         preserve_path: { type: boolean }
-        certificate_id: { type: [integer, 'null'] }
+        certificate_id: { type: [integer, 'null'], description: Optional certificate used to terminate HTTPS on the redirect source domain }
+        trusted_proxy_provider_id: { type: [integer, 'null'], description: Optional trusted proxy provider used to restore the real client IP }
         ssl_forced: { type: boolean }
         http2_support: { type: boolean }
         hsts_enabled: { type: boolean }
@@ -203,7 +205,8 @@ components:
       required: [domains, enabled]
       properties:
         domains: { type: array, items: { type: string } }
-        certificate_id: { type: [integer, 'null'] }
+        certificate_id: { type: [integer, 'null'], description: Optional certificate used to terminate HTTPS before returning the 404 response }
+        trusted_proxy_provider_id: { type: [integer, 'null'], description: Optional trusted proxy provider used to restore the real client IP }
         ssl_forced: { type: boolean }
         http2_support: { type: boolean }
         hsts_enabled: { type: boolean }

@@ -138,63 +138,67 @@ type AccessListInput struct {
 }
 
 type RedirectHost struct {
-	ID                int64     `json:"id"`
-	Domains           []string  `json:"domains"`
-	ForwardHTTPCode   int       `json:"forward_http_code"`
-	ForwardScheme     string    `json:"forward_scheme"`
-	ForwardDomainName string    `json:"forward_domain_name"`
-	PreservePath      bool      `json:"preserve_path"`
-	CertificateID     *int64    `json:"certificate_id,omitempty"`
-	SSLForced         bool      `json:"ssl_forced"`
-	HTTP2Support      bool      `json:"http2_support"`
-	HSTSEnabled       bool      `json:"hsts_enabled"`
-	HSTSSubdomains    bool      `json:"hsts_subdomains"`
-	BlockExploits     bool      `json:"block_exploits"`
-	AdvancedConfig    string    `json:"advanced_config,omitempty"`
-	Enabled           bool      `json:"enabled"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                     int64     `json:"id"`
+	Domains                []string  `json:"domains"`
+	ForwardHTTPCode        int       `json:"forward_http_code"`
+	ForwardScheme          string    `json:"forward_scheme"`
+	ForwardDomainName      string    `json:"forward_domain_name"`
+	PreservePath           bool      `json:"preserve_path"`
+	CertificateID          *int64    `json:"certificate_id,omitempty"`
+	TrustedProxyProviderID *int64    `json:"trusted_proxy_provider_id,omitempty"`
+	SSLForced              bool      `json:"ssl_forced"`
+	HTTP2Support           bool      `json:"http2_support"`
+	HSTSEnabled            bool      `json:"hsts_enabled"`
+	HSTSSubdomains         bool      `json:"hsts_subdomains"`
+	BlockExploits          bool      `json:"block_exploits"`
+	AdvancedConfig         string    `json:"advanced_config,omitempty"`
+	Enabled                bool      `json:"enabled"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
 }
 
 type RedirectHostInput struct {
-	Domains           []string `json:"domains"`
-	ForwardHTTPCode   int      `json:"forward_http_code"`
-	ForwardScheme     string   `json:"forward_scheme"`
-	ForwardDomainName string   `json:"forward_domain_name"`
-	PreservePath      bool     `json:"preserve_path"`
-	CertificateID     *int64   `json:"certificate_id,omitempty"`
-	SSLForced         bool     `json:"ssl_forced"`
-	HTTP2Support      bool     `json:"http2_support"`
-	HSTSEnabled       bool     `json:"hsts_enabled"`
-	HSTSSubdomains    bool     `json:"hsts_subdomains"`
-	BlockExploits     bool     `json:"block_exploits"`
-	AdvancedConfig    string   `json:"advanced_config,omitempty"`
-	Enabled           bool     `json:"enabled"`
+	Domains                []string `json:"domains"`
+	ForwardHTTPCode        int      `json:"forward_http_code"`
+	ForwardScheme          string   `json:"forward_scheme"`
+	ForwardDomainName      string   `json:"forward_domain_name"`
+	PreservePath           bool     `json:"preserve_path"`
+	CertificateID          *int64   `json:"certificate_id,omitempty"`
+	TrustedProxyProviderID *int64   `json:"trusted_proxy_provider_id,omitempty"`
+	SSLForced              bool     `json:"ssl_forced"`
+	HTTP2Support           bool     `json:"http2_support"`
+	HSTSEnabled            bool     `json:"hsts_enabled"`
+	HSTSSubdomains         bool     `json:"hsts_subdomains"`
+	BlockExploits          bool     `json:"block_exploits"`
+	AdvancedConfig         string   `json:"advanced_config,omitempty"`
+	Enabled                bool     `json:"enabled"`
 }
 
 type DeadHost struct {
-	ID             int64     `json:"id"`
-	Domains        []string  `json:"domains"`
-	CertificateID  *int64    `json:"certificate_id,omitempty"`
-	SSLForced      bool      `json:"ssl_forced"`
-	HTTP2Support   bool      `json:"http2_support"`
-	HSTSEnabled    bool      `json:"hsts_enabled"`
-	HSTSSubdomains bool      `json:"hsts_subdomains"`
-	AdvancedConfig string    `json:"advanced_config,omitempty"`
-	Enabled        bool      `json:"enabled"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID                     int64     `json:"id"`
+	Domains                []string  `json:"domains"`
+	CertificateID          *int64    `json:"certificate_id,omitempty"`
+	TrustedProxyProviderID *int64    `json:"trusted_proxy_provider_id,omitempty"`
+	SSLForced              bool      `json:"ssl_forced"`
+	HTTP2Support           bool      `json:"http2_support"`
+	HSTSEnabled            bool      `json:"hsts_enabled"`
+	HSTSSubdomains         bool      `json:"hsts_subdomains"`
+	AdvancedConfig         string    `json:"advanced_config,omitempty"`
+	Enabled                bool      `json:"enabled"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
 }
 
 type DeadHostInput struct {
-	Domains        []string `json:"domains"`
-	CertificateID  *int64   `json:"certificate_id,omitempty"`
-	SSLForced      bool     `json:"ssl_forced"`
-	HTTP2Support   bool     `json:"http2_support"`
-	HSTSEnabled    bool     `json:"hsts_enabled"`
-	HSTSSubdomains bool     `json:"hsts_subdomains"`
-	AdvancedConfig string   `json:"advanced_config,omitempty"`
-	Enabled        bool     `json:"enabled"`
+	Domains                []string `json:"domains"`
+	CertificateID          *int64   `json:"certificate_id,omitempty"`
+	TrustedProxyProviderID *int64   `json:"trusted_proxy_provider_id,omitempty"`
+	SSLForced              bool     `json:"ssl_forced"`
+	HTTP2Support           bool     `json:"http2_support"`
+	HSTSEnabled            bool     `json:"hsts_enabled"`
+	HSTSSubdomains         bool     `json:"hsts_subdomains"`
+	AdvancedConfig         string   `json:"advanced_config,omitempty"`
+	Enabled                bool     `json:"enabled"`
 }
 
 type Stream struct {
