@@ -71,8 +71,13 @@ func main() {
 	}
 
 	proxyManager := proxy.NewManager(store, cfg.DataDir, cfg.AnalyticsIPMode)
-	if err := proxyManager.Apply(); err != nil {
-		log.Fatalf("initial proxy configuration: %v", err)
+	skippedHosts, startupErr := proxyManager.ApplyStartup()
+	if startupErr != nil {
+		if len(skippedHosts) > 0 {
+			log.Printf("WARNING: proxy startup is degraded; isolated Proxy Hosts with unresolved upstreams: %v; cause: %v", skippedHosts, startupErr)
+		} else {
+			log.Printf("WARNING: initial proxy configuration could not be fully activated; ZentProxy will stay manageable using the last known-good or safe fallback configuration: %v", startupErr)
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

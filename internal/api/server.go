@@ -380,6 +380,21 @@ func (s *Server) hostGet(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, h)
 }
+func hostInputFromHost(h model.Host) model.HostInput {
+	return model.HostInput{
+		Name: h.Name, Domains: append([]string(nil), h.Domains...), Scheme: h.Scheme,
+		ForwardHost: h.ForwardHost, ForwardPort: h.ForwardPort, Enabled: h.Enabled,
+		WebSockets: h.WebSockets, PreserveHost: h.PreserveHost,
+		StatisticsEnabled: h.StatisticsEnabled, StoreQueryString: h.StoreQueryString,
+		TrustedProxyProviderID: h.TrustedProxyProviderID, AccessListID: h.AccessListID,
+		BlockCommonExploits: h.BlockCommonExploits, CertificateID: h.CertificateID,
+		SSLForced: h.SSLForced, HTTP2Support: h.HTTP2Support, HSTSEnabled: h.HSTSEnabled,
+		HSTSSubdomains: h.HSTSSubdomains, CachingEnabled: h.CachingEnabled,
+		TrustForwardedProto: h.TrustForwardedProto, AdvancedConfig: h.AdvancedConfig,
+		CustomLocations: append([]model.CustomLocation(nil), h.CustomLocations...),
+	}
+}
+
 func (s *Server) hostsCreate(w http.ResponseWriter, r *http.Request) {
 	var in model.HostInput
 	if err := decodeJSON(r, &in); err != nil {
@@ -424,7 +439,9 @@ func (s *Server) hostsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.proxy.Apply(); err != nil {
-		jsonError(w, 500, "host saved but proxy reload failed: "+err.Error())
+		_ = s.store.DeleteHost(h.ID)
+		_ = s.proxy.Apply()
+		jsonError(w, 500, "host was not saved because proxy activation failed: "+err.Error())
 		return
 	}
 	s.store.AddAudit(actor(r), "create", "host", strconv.FormatInt(h.ID, 10), h.Name)
@@ -472,6 +489,15 @@ func (s *Server) hostUpdate(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 409, err.Error())
 		return
 	}
+	oldHost, err := s.store.GetHost(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		jsonError(w, 404, "host not found")
+		return
+	}
+	if err != nil {
+		jsonError(w, 500, "cannot read host")
+		return
+	}
 	h, err := s.store.UpdateHost(id, in)
 	if errors.Is(err, sql.ErrNoRows) {
 		jsonError(w, 404, "host not found")
@@ -482,7 +508,9 @@ func (s *Server) hostUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.proxy.Apply(); err != nil {
-		jsonError(w, 500, "host saved but proxy reload failed: "+err.Error())
+		_, _ = s.store.UpdateHost(id, hostInputFromHost(oldHost))
+		_ = s.proxy.Apply()
+		jsonError(w, 500, "host update was rolled back because proxy activation failed: "+err.Error())
 		return
 	}
 	s.store.AddAudit(actor(r), "update", "host", strconv.FormatInt(h.ID, 10), h.Name)

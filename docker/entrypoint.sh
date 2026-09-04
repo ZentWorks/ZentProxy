@@ -7,10 +7,10 @@ RUNTIME_PREFIX="$DATA_DIR/nginx/runtime"
 mkdir -p "$DATA_DIR" "$DATA_DIR/nginx/hosts" "$SYSTEM_DIR" "$RUNTIME_PREFIX/logs" "$DATA_DIR/nginx/tmp/client_body" "$DATA_DIR/nginx/tmp/proxy" "$DATA_DIR/nginx/tmp/fastcgi" "$DATA_DIR/nginx/tmp/uwsgi" "$DATA_DIR/nginx/tmp/scgi" "$DATA_DIR/logs" "$DATA_DIR/cache" "$DATA_DIR/certs/default" "$DATA_DIR/acme" "$DATA_DIR/acme-webroot/.well-known/acme-challenge"
 
 # A container restart cannot retain an OpenResty process, but /data is persistent.
-# Generated nginx.conf is runtime state too: remove it before starting the control
-# plane so the readiness wait below cannot be satisfied by a stale config from a
-# previous image/version. The control plane recreates it atomically from SQLite.
-rm -f "$SYSTEM_DIR/openresty.pid" "$SYSTEM_DIR/openresty-test.pid" "$SYSTEM_DIR/nginx-test.conf" "$DATA_DIR/nginx/nginx.conf"
+# Keep the last known-good nginx.conf. The control plane replaces it atomically
+# only after a successful validation. This guarantees that a bad/unreachable
+# Proxy Host in SQLite cannot remove the recovery path on restart.
+rm -f "$SYSTEM_DIR/openresty.pid" "$SYSTEM_DIR/openresty-test.pid" "$SYSTEM_DIR/nginx-test.conf"
 
 if [ ! -s "$DATA_DIR/certs/default/fullchain.pem" ] || [ ! -s "$DATA_DIR/certs/default/privkey.pem" ]; then
   openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \

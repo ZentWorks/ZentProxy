@@ -298,9 +298,158 @@ func (m *Manager) ReopenLogs() error {
 func (m *Manager) Apply() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	hosts, err := m.store.ListHosts()
-	if err != nil {
-		return err
+	return m.applyLocked(nil)
+}
+
+// ApplyStartup is a fail-safe startup activation path. It first attempts the
+// complete configuration. If OpenResty reports an unresolved upstream host,
+// ZentProxy retries with only the affected Proxy Host(s) isolated onto a local
+// fail-closed upstream. Their server_name/TLS/access boundaries stay present,
+// so they cannot fall through to ZentLoop or another catch-all. The database is
+// never modified by this fallback.
+//
+// If the failure is unrelated to an unresolved upstream, the last known-good
+// nginx.conf is retained. On a fresh installation where no valid config exists,
+// a minimal neutral 404 config is written so the container remains manageable.
+func (m *Manager) ApplyStartup() ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	initialErr := m.applyLocked(nil)
+	if initialErr == nil {
+		return nil, nil
+	}
+
+	hosts, listErr := m.store.ListHosts()
+	if listErr == nil {
+		remaining := append([]model.Host(nil), hosts...)
+		skippedSet := map[string]struct{}{}
+		currentErr := initialErr
+		for len(remaining) > 0 {
+			upstreamHost := unresolvedUpstreamFromError(currentErr)
+			if upstreamHost == "" {
+				break
+			}
+			isolation, isolated := isolateHostsReferencingUpstream(remaining, upstreamHost)
+			if len(isolated) == 0 {
+				break
+			}
+			for _, name := range isolated {
+				skippedSet[name] = struct{}{}
+			}
+			if degradedErr := m.applyLocked(isolation); degradedErr == nil {
+				out := make([]string, 0, len(skippedSet))
+				for name := range skippedSet {
+					out = append(out, name)
+				}
+				sort.Strings(out)
+				return out, initialErr
+			} else {
+				currentErr = degradedErr
+				remaining = isolation
+			}
+		}
+	}
+
+	path := filepath.Join(m.dataDir, "nginx", "nginx.conf")
+	if info, statErr := os.Stat(path); statErr == nil && info.Size() > 0 && m.existingConfigValidLocked(path) {
+		return nil, initialErr
+	}
+	if fallbackErr := m.writeSafeFallbackLocked(); fallbackErr != nil {
+		return nil, fmt.Errorf("%v; safe startup fallback failed: %w", initialErr, fallbackErr)
+	}
+	return nil, initialErr
+}
+
+var unresolvedUpstreamRE = regexp.MustCompile(`host not found in upstream "([^"]+)"`)
+
+func unresolvedUpstreamFromError(err error) string {
+	if err == nil {
+		return ""
+	}
+	match := unresolvedUpstreamRE.FindStringSubmatch(err.Error())
+	if len(match) != 2 {
+		return ""
+	}
+	value := strings.TrimSpace(match[1])
+	if host, _, splitErr := net.SplitHostPort(value); splitErr == nil {
+		return strings.Trim(strings.TrimSpace(host), "[]")
+	}
+	if i := strings.LastIndex(value, ":"); i > 0 && !strings.Contains(value[i+1:], ":") {
+		return strings.Trim(strings.TrimSpace(value[:i]), "[]")
+	}
+	return strings.Trim(value, "[]")
+}
+
+func isolateHostsReferencingUpstream(hosts []model.Host, upstreamHost string) ([]model.Host, []string) {
+	upstreamHost = strings.Trim(strings.TrimSpace(upstreamHost), "[]")
+	out := append([]model.Host(nil), hosts...)
+	isolated := make([]string, 0)
+	for i := range out {
+		h := &out[i]
+		matches := false
+		if h.Enabled {
+			for _, name := range hostUpstreamNames(*h) {
+				if strings.EqualFold(name, upstreamHost) {
+					matches = true
+					break
+				}
+			}
+		}
+		if !matches {
+			continue
+		}
+		isolated = append(isolated, h.Name)
+		h.Scheme = "http"
+		h.ForwardHost = "127.0.0.1"
+		h.ForwardPort = 9
+		if len(h.CustomLocations) > 0 {
+			locations := append([]model.CustomLocation(nil), h.CustomLocations...)
+			for j := range locations {
+				locations[j].Scheme = "http"
+				locations[j].ForwardHost = "127.0.0.1"
+				locations[j].ForwardPort = 9
+			}
+			h.CustomLocations = locations
+		}
+	}
+	sort.Strings(isolated)
+	return out, isolated
+}
+
+func hostUpstreamNames(h model.Host) []string {
+	seen := map[string]struct{}{}
+	add := func(raw string) {
+		raw = strings.TrimSpace(strings.Trim(raw, "[]"))
+		if raw == "" || net.ParseIP(raw) != nil {
+			return
+		}
+		seen[raw] = struct{}{}
+	}
+	add(h.ForwardHost)
+	for _, loc := range h.CustomLocations {
+		name := strings.TrimSpace(loc.ForwardHost)
+		if name == "" {
+			name = h.ForwardHost
+		}
+		add(name)
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (m *Manager) applyLocked(hostOverride []model.Host) error {
+	hosts := hostOverride
+	var err error
+	if hostOverride == nil {
+		hosts, err = m.store.ListHosts()
+		if err != nil {
+			return err
+		}
 	}
 	redirects, err := m.store.ListRedirectHosts()
 	if err != nil {
@@ -400,6 +549,54 @@ func (m *Manager) Apply() error {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("proxy reload failed: %v: %s", err, strings.TrimSpace(string(out)))
 		}
+	}
+	return nil
+}
+
+func (m *Manager) existingConfigValidLocked(path string) bool {
+	binary := "/usr/local/openresty/bin/openresty"
+	if _, err := os.Stat(binary); err != nil {
+		// Unit/development environments may not contain OpenResty. The runtime
+		// container always does, so retain the file here rather than deleting a
+		// potentially valid last-known-good configuration without a validator.
+		return true
+	}
+	cmd := exec.Command(binary, "-p", m.runtimePrefix(), "-e", "stderr", "-t", "-c", path)
+	return cmd.Run() == nil
+}
+
+func (m *Manager) writeSafeFallbackLocked() error {
+	dir := filepath.Join(m.dataDir, "nginx")
+	if err := os.MkdirAll(filepath.Join(dir, "runtime", "logs"), 0o750); err != nil {
+		return err
+	}
+	conf := fmt.Sprintf(`worker_processes auto;
+error_log %s/logs/openresty-error.log warn;
+pid %s;
+
+events { worker_connections 1024; }
+
+http {
+    server_tokens off;
+    access_log off;
+    server { listen 80 default_server; server_name _; return 404; }
+    server {
+        listen 443 ssl default_server;
+        server_name _;
+        ssl_certificate %s/certs/default/fullchain.pem;
+        ssl_certificate_key %s/certs/default/privkey.pem;
+        return 404;
+    }
+}
+`, nginxQuote(m.dataDir), nginxQuote(m.runtimePIDPath()), nginxQuote(m.dataDir), nginxQuote(m.dataDir))
+	path := filepath.Join(dir, "nginx.conf")
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(conf), 0o640); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
 	}
 	return nil
 }
