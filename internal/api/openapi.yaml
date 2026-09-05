@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: ZentProxy API
-  version: 0.7.15
+  version: 0.7.17
   description: Versioned API for ZentProxy proxy management, certificates, routing, analytics, trusted proxies, integrations, user preferences and migration tooling.
 servers:
   - url: /api/v1
@@ -46,11 +46,11 @@ components:
       type: object
       required: [path, scheme, forward_host, forward_port]
       properties:
-        path: { type: string }
+        path: { type: string, description: Location path beginning with /. The root path / is reserved for the main host target. }
         scheme: { type: string, enum: [http, https] }
-        forward_host: { type: string }
+        forward_host: { type: string, description: Backend hostname or IP address. A legacy trailing slash is normalized only when the remaining value is a valid hostname/IP. }
         forward_port: { type: integer, minimum: 1, maximum: 65535 }
-        forward_path: { type: string }
+        forward_path: { type: string, description: Optional upstream URI prefix beginning with /. }
         advanced_config: { type: string }
     HostInput:
       type: object
@@ -68,11 +68,10 @@ components:
         preserve_host: { type: boolean }
         statistics_enabled: { type: boolean }
         store_query_string: { type: boolean, default: false }
-        trusted_proxy_provider_id: { type: [integer, 'null'] }
+        trusted_proxy_provider_id: { type: [integer, 'null'], description: Optional trusted proxy provider used to restore the real client IP }
         access_list_id: { type: [integer, 'null'] }
         block_common_exploits: { type: boolean }
-        certificate_id: { type: [integer, 'null'], description: Optional certificate used to terminate HTTPS on the redirect source domain }
-        trusted_proxy_provider_id: { type: [integer, 'null'], description: Optional trusted proxy provider used to restore the real client IP }
+        certificate_id: { type: [integer, 'null'], description: Optional certificate used to terminate HTTPS. The certificate SANs must cover every configured host domain. }
         ssl_forced: { type: boolean }
         http2_support: { type: boolean }
         hsts_enabled: { type: boolean }
@@ -191,7 +190,7 @@ components:
         forward_scheme: { type: string, enum: [auto, http, https] }
         forward_domain_name: { type: string }
         preserve_path: { type: boolean }
-        certificate_id: { type: [integer, 'null'], description: Optional certificate used to terminate HTTPS on the redirect source domain }
+        certificate_id: { type: [integer, 'null'], description: Optional certificate used to terminate HTTPS on the redirect source domain. The certificate SANs must cover every configured redirect domain. }
         trusted_proxy_provider_id: { type: [integer, 'null'], description: Optional trusted proxy provider used to restore the real client IP }
         ssl_forced: { type: boolean }
         http2_support: { type: boolean }
@@ -205,7 +204,7 @@ components:
       required: [domains, enabled]
       properties:
         domains: { type: array, items: { type: string } }
-        certificate_id: { type: [integer, 'null'], description: Optional certificate used to terminate HTTPS before returning the 404 response }
+        certificate_id: { type: [integer, 'null'], description: Optional certificate used to terminate HTTPS before returning the 404 response. The certificate SANs must cover every configured 404 domain. }
         trusted_proxy_provider_id: { type: [integer, 'null'], description: Optional trusted proxy provider used to restore the real client IP }
         ssl_forced: { type: boolean }
         http2_support: { type: boolean }

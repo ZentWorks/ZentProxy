@@ -35,6 +35,9 @@ func Open(dataDir string) (*Store, error) {
 		"PRAGMA foreign_keys=ON",
 		"PRAGMA busy_timeout=5000",
 		"PRAGMA synchronous=NORMAL",
+		"PRAGMA temp_store=MEMORY",
+		"PRAGMA cache_size=-32768",
+		"PRAGMA mmap_size=134217728",
 	} {
 		if _, err := db.Exec(q); err != nil {
 			db.Close()
@@ -1317,13 +1320,38 @@ func (s *Store) SetAnalyticsOffset(name string, offset int64) error {
 }
 
 func (s *Store) InsertRawRequestWithOffset(name string, offset int64, r model.RawRequest) error {
+	return s.InsertRawRequestsWithOffset(name, offset, []model.RawRequest{r})
+}
+
+// InsertRawRequestsWithOffset writes analytics in batches so request metadata
+// processing never turns into one SQLite transaction per proxied request. The
+// checkpoint is committed atomically with the batch.
+func (s *Store) InsertRawRequestsWithOffset(name string, offset int64, requests []model.RawRequest) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`INSERT INTO raw_requests(at,host,ip,method,path,query,status,bytes,request_time_ms,upstream_time_ms,user_agent,referer,http_version,tls_version,zentloop) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, rawRequestArgs(r)...); err != nil {
-		return err
+
+	const rowsPerInsert = 50 // 50 * 15 = 750 bind parameters; safe across SQLite builds.
+	for start := 0; start < len(requests); start += rowsPerInsert {
+		end := start + rowsPerInsert
+		if end > len(requests) {
+			end = len(requests)
+		}
+		var q strings.Builder
+		q.WriteString(`INSERT INTO raw_requests(at,host,ip,method,path,query,status,bytes,request_time_ms,upstream_time_ms,user_agent,referer,http_version,tls_version,zentloop) VALUES `)
+		args := make([]any, 0, (end-start)*15)
+		for i := start; i < end; i++ {
+			if i > start {
+				q.WriteByte(',')
+			}
+			q.WriteString(`(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+			args = append(args, rawRequestArgs(requests[i])...)
+		}
+		if _, err := tx.Exec(q.String(), args...); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.Exec(`INSERT INTO analytics_state(name,offset,updated_at) VALUES(?,?,?) ON CONFLICT(name) DO UPDATE SET offset=excluded.offset,updated_at=excluded.updated_at`, name, offset, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return err

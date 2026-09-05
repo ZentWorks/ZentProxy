@@ -196,7 +196,7 @@ Then edit `.env` before starting ZentProxy.
 | `ZENTPROXY_DATA_DIR` | `/data` | No | Persistent data directory inside the container. |
 | `ZENTPROXY_ANALYTICS_RETENTION_DAYS` | `7` | No | Analytics retention in days. Effective range is 1–30; larger values are capped at 30. |
 | `ZENTPROXY_ANALYTICS_IP_MODE` | `anonymized` | No | Client IP storage: `full`, `anonymized`, or `disabled`. |
-| `ZENTPROXY_ANALYTICS_LOG_MAX_MB` | `64` | No | Maximum size in MB of the temporary JSON analytics access-log spool. Processed data is stored in SQLite. |
+| `ZENTPROXY_ANALYTICS_LOG_MAX_MB` | `64` | No | Maximum size in MB of the temporary runtime analytics spool. Processed data is stored in SQLite; the spool itself is not persistent application data. |
 | `ZENTPROXY_PROVIDER_REFRESH_HOURS` | `6` | No | Refresh interval for provider-related data, in hours. |
 | `ZENTPROXY_ADMIN_COOKIE_SECURE` | `false` | No | Controls the Secure attribute of the administrator session cookie. Enable it when the administration interface is served exclusively through HTTPS. |
 | `ZENTPROXY_TRUSTED_TRANSPORT_HOPS` | unset | No | Optional comma-separated list of exact container/NAT transport hops when automatic detection is insufficient. |

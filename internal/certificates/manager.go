@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/ZentWorks/ZentProxy/internal/db"
@@ -88,6 +89,141 @@ func NormalizeDomains(in []string) ([]string, error) {
 	return out, nil
 }
 
+func ValidateMaterial(c model.Certificate) error {
+	if strings.TrimSpace(c.CertPath) == "" || strings.TrimSpace(c.KeyPath) == "" {
+		return errors.New("certificate material is incomplete")
+	}
+	if _, err := tls.LoadX509KeyPair(c.CertPath, c.KeyPath); err != nil {
+		return fmt.Errorf("certificate/private key mismatch: %w", err)
+	}
+	if _, err := readLeaf(c.CertPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ValidateDomains(c model.Certificate, domains []string) error {
+	if err := ValidateMaterial(c); err != nil {
+		return err
+	}
+	leaf, err := readLeaf(c.CertPath)
+	if err != nil {
+		return err
+	}
+	for _, raw := range domains {
+		domain := strings.ToLower(strings.TrimSpace(raw))
+		if domain == "" {
+			continue
+		}
+		if strings.HasPrefix(domain, "*.") {
+			matched := false
+			for _, san := range leaf.DNSNames {
+				if strings.EqualFold(strings.TrimSpace(san), domain) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return fmt.Errorf("certificate does not cover wildcard domain %s", domain)
+			}
+			continue
+		}
+		if err := leaf.VerifyHostname(strings.Trim(domain, "[]")); err != nil {
+			return fmt.Errorf("certificate does not cover domain %s", domain)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) stageCertificatePair(id int64, certPEM, keyPEM []byte) (string, string, error) {
+	if _, err := tls.X509KeyPair(certPEM, keyPEM); err != nil {
+		return "", "", fmt.Errorf("certificate/private key mismatch: %w", err)
+	}
+	versionsDir := filepath.Join(m.dataDir, "certs", strconv.FormatInt(id, 10), "versions")
+	if err := os.MkdirAll(versionsDir, 0o750); err != nil {
+		return "", "", err
+	}
+	versionDir, err := os.MkdirTemp(versionsDir, "v-")
+	if err != nil {
+		return "", "", err
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.RemoveAll(versionDir)
+		}
+	}()
+	if err := os.Chmod(versionDir, 0o750); err != nil {
+		return "", "", err
+	}
+	certPath := filepath.Join(versionDir, "fullchain.pem")
+	keyPath := filepath.Join(versionDir, "privkey.pem")
+	if err := writeFileSync(certPath, certPEM, 0o640); err != nil {
+		return "", "", err
+	}
+	if err := writeFileSync(keyPath, keyPEM, 0o600); err != nil {
+		return "", "", err
+	}
+	// Persist both directory entries before the database can point at this
+	// version. This closes the small crash/power-loss window where the PEM files
+	// themselves were synced but their directory entries were not yet durable.
+	if err := syncDir(versionDir); err != nil {
+		return "", "", err
+	}
+	if err := syncDir(versionsDir); err != nil {
+		return "", "", err
+	}
+	staged := model.Certificate{CertPath: certPath, KeyPath: keyPath}
+	if err := ValidateMaterial(staged); err != nil {
+		return "", "", err
+	}
+	cleanup = false
+	return certPath, keyPath, nil
+}
+
+func writeFileSync(path string, raw []byte, mode os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	ok := false
+	defer func() {
+		_ = f.Close()
+		if !ok {
+			_ = os.Remove(path)
+		}
+	}()
+	if _, err := f.Write(raw); err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	ok = true
+	return nil
+}
+
+func syncDir(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	if err := dir.Sync(); err != nil {
+		// Some Docker bind/network filesystems do not implement directory fsync.
+		// The PEM files themselves were already fsynced, so keep certificate
+		// management portable instead of failing an otherwise valid renewal.
+		if errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 func (m *Manager) Issue(ctx context.Context, in model.CertificateInput) (model.Certificate, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -128,11 +264,14 @@ func (m *Manager) Issue(ctx context.Context, in model.CertificateInput) (model.C
 		_ = m.store.DeleteCertificate(c.ID)
 		return model.Certificate{}, err
 	}
-	if _, err = m.store.UpdateCertificate(c); err != nil {
-		_ = m.store.DeleteCertificate(c.ID)
-		return model.Certificate{}, err
+	certPEM, keyPEM, err := m.runLego(ctx, c)
+	if err != nil {
+		c.LastError = err.Error()
+		_, _ = m.store.UpdateCertificate(c)
+		return c, err
 	}
-	if err := m.runLego(ctx, c); err != nil {
+	c.CertPath, c.KeyPath, err = m.stageCertificatePair(c.ID, certPEM, keyPEM)
+	if err != nil {
 		c.LastError = err.Error()
 		_, _ = m.store.UpdateCertificate(c)
 		return c, err
@@ -176,18 +315,8 @@ func (m *Manager) Import(in model.CertificateImportInput) (model.Certificate, er
 	if err != nil {
 		return model.Certificate{}, err
 	}
-	certDir := filepath.Join(m.dataDir, "certs", strconv.FormatInt(c.ID, 10))
-	if err := os.MkdirAll(certDir, 0o750); err != nil {
-		_ = m.store.DeleteCertificate(c.ID)
-		return model.Certificate{}, err
-	}
-	c.CertPath = filepath.Join(certDir, "fullchain.pem")
-	c.KeyPath = filepath.Join(certDir, "privkey.pem")
-	if err := os.WriteFile(c.CertPath, []byte(in.CertificatePEM), 0o640); err != nil {
-		_ = m.store.DeleteCertificate(c.ID)
-		return model.Certificate{}, err
-	}
-	if err := os.WriteFile(c.KeyPath, []byte(in.PrivateKeyPEM), 0o600); err != nil {
+	c.CertPath, c.KeyPath, err = m.stageCertificatePair(c.ID, []byte(in.CertificatePEM), []byte(in.PrivateKeyPEM))
+	if err != nil {
 		_ = m.store.DeleteCertificate(c.ID)
 		return model.Certificate{}, err
 	}
@@ -214,8 +343,6 @@ func (m *Manager) preparePaths(c *model.Certificate, creds map[string]string) er
 	if err := os.MkdirAll(certDir, 0o750); err != nil {
 		return err
 	}
-	c.CertPath = filepath.Join(certDir, "fullchain.pem")
-	c.KeyPath = filepath.Join(certDir, "privkey.pem")
 	return m.writeDNSEnv(c.ID, creds)
 }
 
@@ -246,14 +373,14 @@ func (m *Manager) writeDNSEnv(id int64, creds map[string]string) error {
 	return os.WriteFile(filepath.Join(dir, "dns.env"), []byte(b.String()), 0o600)
 }
 
-func (m *Manager) runLego(ctx context.Context, c model.Certificate) error {
+func (m *Manager) runLego(ctx context.Context, c model.Certificate) ([]byte, []byte, error) {
 	binary := "/usr/local/bin/lego"
 	if _, err := os.Stat(binary); err != nil {
-		return errors.New("ACME client is not installed in this image")
+		return nil, nil, errors.New("ACME client is not installed in this image")
 	}
 	acmePath := filepath.Join(m.dataDir, "acme")
 	if err := os.MkdirAll(filepath.Join(m.dataDir, "acme-webroot", ".well-known", "acme-challenge"), 0o750); err != nil {
-		return err
+		return nil, nil, err
 	}
 	args := []string{"run", "--path", acmePath, "--accept-tos", "--server", "letsencrypt", "--email", c.Email, "--cert.name", fmt.Sprintf("zentproxy-%d", c.ID), "--key-type", "EC256"}
 	hasIP := false
@@ -278,16 +405,21 @@ func (m *Manager) runLego(ctx context.Context, c model.Certificate) error {
 	cmd := exec.CommandContext(ctx, binary, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("Let's Encrypt failed: %v: %s", err, trimOutput(out))
+		return nil, nil, fmt.Errorf("Let's Encrypt failed: %v: %s", err, trimOutput(out))
 	}
 	srcBase := filepath.Join(acmePath, "certificates", fmt.Sprintf("zentproxy-%d", c.ID))
-	if err := copyFile(srcBase+".crt", c.CertPath, 0o640); err != nil {
-		return err
+	certPEM, err := os.ReadFile(srcBase + ".crt")
+	if err != nil {
+		return nil, nil, fmt.Errorf("read ACME certificate output: %w", err)
 	}
-	if err := copyFile(srcBase+".key", c.KeyPath, 0o600); err != nil {
-		return err
+	keyPEM, err := os.ReadFile(srcBase + ".key")
+	if err != nil {
+		return nil, nil, fmt.Errorf("read ACME private key output: %w", err)
 	}
-	return nil
+	if _, err := tls.X509KeyPair(certPEM, keyPEM); err != nil {
+		return nil, nil, fmt.Errorf("ACME certificate/private key mismatch: %w", err)
+	}
+	return certPEM, keyPEM, nil
 }
 
 func (m *Manager) Renew(ctx context.Context, id int64, force bool) (model.Certificate, error) {
@@ -303,11 +435,19 @@ func (m *Manager) Renew(ctx context.Context, id int64, force bool) (model.Certif
 	if !force && !shouldRenew(c.CertPath) {
 		return c, nil
 	}
-	if err := m.runLego(ctx, c); err != nil {
+	certPEM, keyPEM, err := m.runLego(ctx, c)
+	if err != nil {
 		c.LastError = err.Error()
 		_, _ = m.store.UpdateCertificate(c)
 		return c, err
 	}
+	newCertPath, newKeyPath, err := m.stageCertificatePair(c.ID, certPEM, keyPEM)
+	if err != nil {
+		c.LastError = err.Error()
+		_, _ = m.store.UpdateCertificate(c)
+		return c, err
+	}
+	c.CertPath, c.KeyPath = newCertPath, newKeyPath
 	c, err = m.refreshMetadata(c)
 	if err != nil {
 		return c, err
@@ -422,13 +562,6 @@ func readLeaf(path string) (*x509.Certificate, error) {
 		return nil, errors.New("certificate PEM is invalid")
 	}
 	return x509.ParseCertificate(block.Bytes)
-}
-func copyFile(src, dst string, mode os.FileMode) error {
-	raw, err := os.ReadFile(src)
-	if err != nil {
-		return fmt.Errorf("read ACME output: %w", err)
-	}
-	return os.WriteFile(dst, raw, mode)
 }
 func trimOutput(b []byte) string {
 	s := strings.TrimSpace(string(b))

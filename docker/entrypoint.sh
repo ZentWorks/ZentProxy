@@ -2,9 +2,13 @@
 set -eu
 
 DATA_DIR="${ZENTPROXY_DATA_DIR:-/data}"
+RUNTIME_DIR="${ZENTPROXY_RUNTIME_DIR:-/tmp/zentproxy}"
 SYSTEM_DIR="$DATA_DIR/nginx/system"
 RUNTIME_PREFIX="$DATA_DIR/nginx/runtime"
-mkdir -p "$DATA_DIR" "$DATA_DIR/nginx/hosts" "$SYSTEM_DIR" "$RUNTIME_PREFIX/logs" "$DATA_DIR/nginx/tmp/client_body" "$DATA_DIR/nginx/tmp/proxy" "$DATA_DIR/nginx/tmp/fastcgi" "$DATA_DIR/nginx/tmp/uwsgi" "$DATA_DIR/nginx/tmp/scgi" "$DATA_DIR/logs" "$DATA_DIR/cache" "$DATA_DIR/certs/default" "$DATA_DIR/acme" "$DATA_DIR/acme-webroot/.well-known/acme-challenge"
+mkdir -p "$DATA_DIR" "$DATA_DIR/nginx/hosts" "$SYSTEM_DIR" "$RUNTIME_PREFIX/logs" \
+  "$RUNTIME_DIR/nginx/tmp/client_body" "$RUNTIME_DIR/nginx/tmp/proxy" "$RUNTIME_DIR/nginx/tmp/fastcgi" \
+  "$RUNTIME_DIR/nginx/tmp/uwsgi" "$RUNTIME_DIR/nginx/tmp/scgi" "$RUNTIME_DIR/analytics" "$RUNTIME_DIR/cache" \
+  "$DATA_DIR/logs" "$DATA_DIR/certs/default" "$DATA_DIR/acme" "$DATA_DIR/acme-webroot/.well-known/acme-challenge"
 
 # A container restart cannot retain an OpenResty process, but /data is persistent.
 # Keep the last known-good nginx.conf. The control plane replaces it atomically
@@ -19,7 +23,7 @@ if [ ! -s "$DATA_DIR/certs/default/fullchain.pem" ] || [ ! -s "$DATA_DIR/certs/d
     -out "$DATA_DIR/certs/default/fullchain.pem" >/dev/null 2>&1
   chmod 600 "$DATA_DIR/certs/default/privkey.pem"
 fi
-chown -R zentproxy:zentproxy "$DATA_DIR"
+chown -R zentproxy:zentproxy "$DATA_DIR" "$RUNTIME_DIR"
 
 su-exec zentproxy:zentproxy /usr/local/bin/zentproxy &
 APP_PID=$!

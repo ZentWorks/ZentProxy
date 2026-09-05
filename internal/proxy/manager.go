@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"net"
 	"os"
 	"os/exec"
@@ -17,6 +18,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/ZentWorks/ZentProxy/internal/certificates"
 	"github.com/ZentWorks/ZentProxy/internal/db"
 	"github.com/ZentWorks/ZentProxy/internal/model"
 )
@@ -27,6 +29,29 @@ type Manager struct {
 	trustedTransportHops []string
 	analyticsIPMode      string
 	mu                   sync.Mutex
+}
+
+func runtimeWorkDir() string {
+	if value := strings.TrimSpace(os.Getenv("ZENTPROXY_RUNTIME_DIR")); value != "" {
+		return filepath.Clean(value)
+	}
+	return "/tmp/zentproxy"
+}
+
+func analyticsLogPath() string {
+	return filepath.Join(runtimeWorkDir(), "analytics", "events.spool")
+}
+
+func nginxTempDir() string {
+	return filepath.Join(runtimeWorkDir(), "nginx", "tmp")
+}
+
+func proxyCacheDir() string {
+	return filepath.Join(runtimeWorkDir(), "cache")
+}
+
+func nginxErrorLogPath() string {
+	return filepath.Join(runtimeWorkDir(), "nginx", "error.log")
 }
 
 func NewManager(store *db.Store, dataDir string, analyticsIPMode ...string) *Manager {
@@ -102,6 +127,77 @@ var (
 	hostnameRE = regexp.MustCompile(`^[a-zA-Z0-9_](?:[a-zA-Z0-9_.-]{0,251}[a-zA-Z0-9_])?$`)
 )
 
+func validForwardHost(raw string) bool {
+	h := strings.TrimSpace(raw)
+	if h == "" {
+		return false
+	}
+	return hostnameRE.MatchString(h) || net.ParseIP(strings.Trim(h, "[]")) != nil
+}
+
+func normalizeForwardHost(raw string) string {
+	h := strings.TrimSpace(raw)
+	if validForwardHost(h) {
+		return h
+	}
+	// Compatibility repair for legacy custom-location rows that accidentally
+	// persisted a URL-style trailing slash in forward_host (for example
+	// "192.168.1.10/"). Only strip slashes when the remaining value is a valid
+	// hostname/IP, so malformed input is never silently broadened.
+	candidate := strings.TrimRight(h, "/")
+	if candidate != h && validForwardHost(candidate) {
+		return candidate
+	}
+	return h
+}
+
+func normalizeCustomLocation(loc model.CustomLocation, parent model.HostInput) model.CustomLocation {
+	loc.Path = strings.TrimSpace(loc.Path)
+	if loc.Path == "" {
+		loc.Path = "/"
+	}
+	loc.Scheme = strings.ToLower(strings.TrimSpace(loc.Scheme))
+	if loc.Scheme == "" {
+		loc.Scheme = parent.Scheme
+	}
+	loc.ForwardHost = normalizeForwardHost(loc.ForwardHost)
+	loc.ForwardPath = strings.TrimSpace(loc.ForwardPath)
+	if loc.ForwardPath != "" && !strings.HasPrefix(loc.ForwardPath, "/") {
+		loc.ForwardPath = "/" + loc.ForwardPath
+	}
+	return loc
+}
+
+func validateCustomLocation(loc model.CustomLocation, parent model.HostInput) error {
+	path := strings.TrimSpace(loc.Path)
+	if path == "" || !strings.HasPrefix(path, "/") || path == "/" || strings.ContainsAny(path, " \t\r\n;{}#$\\") {
+		return fmt.Errorf("invalid custom location path: %s", path)
+	}
+	if loc.Scheme != "http" && loc.Scheme != "https" {
+		return fmt.Errorf("custom location %s scheme must be http or https", path)
+	}
+	host := strings.TrimSpace(loc.ForwardHost)
+	if host == "" {
+		host = parent.ForwardHost
+	}
+	if !validForwardHost(host) {
+		return fmt.Errorf("custom location %s has invalid forward_host", path)
+	}
+	port := loc.ForwardPort
+	if port == 0 {
+		port = parent.ForwardPort
+	}
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("custom location %s forward_port must be between 1 and 65535", path)
+	}
+	if fp := strings.TrimSpace(loc.ForwardPath); fp != "" {
+		if !strings.HasPrefix(fp, "/") || strings.ContainsAny(fp, " \t\r\n;{}#$\\\"") {
+			return fmt.Errorf("custom location %s has invalid forward_path", path)
+		}
+	}
+	return nil
+}
+
 func ValidateHost(in model.HostInput) error {
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" || len(in.Name) > 120 {
@@ -128,8 +224,22 @@ func ValidateHost(in model.HostInput) error {
 		return fmt.Errorf("forward_port must be between 1 and 65535")
 	}
 	h := strings.TrimSpace(in.ForwardHost)
-	if h == "" || (!hostnameRE.MatchString(h) && net.ParseIP(strings.Trim(h, "[]")) == nil) {
+	if !validForwardHost(h) {
 		return fmt.Errorf("invalid forward_host")
+	}
+	if len(in.CustomLocations) > 50 {
+		return fmt.Errorf("at most 50 custom locations are allowed")
+	}
+	seenPaths := map[string]struct{}{}
+	for _, loc := range in.CustomLocations {
+		if err := validateCustomLocation(loc, in); err != nil {
+			return err
+		}
+		key := strings.TrimSpace(loc.Path)
+		if _, exists := seenPaths[key]; exists {
+			return fmt.Errorf("duplicate custom location path: %s", key)
+		}
+		seenPaths[key] = struct{}{}
 	}
 	return nil
 }
@@ -137,7 +247,10 @@ func ValidateHost(in model.HostInput) error {
 func normalizeHostInput(in model.HostInput) model.HostInput {
 	in.Name = strings.TrimSpace(in.Name)
 	in.Scheme = strings.ToLower(strings.TrimSpace(in.Scheme))
-	in.ForwardHost = strings.TrimSpace(in.ForwardHost)
+	in.ForwardHost = normalizeForwardHost(in.ForwardHost)
+	for i := range in.CustomLocations {
+		in.CustomLocations[i] = normalizeCustomLocation(in.CustomLocations[i], in)
+	}
 	for i := range in.Domains {
 		in.Domains[i] = normalizeServerName(in.Domains[i])
 	}
@@ -491,6 +604,33 @@ func (m *Manager) applyLocked(hostOverride []model.Host) error {
 	for _, c := range certs {
 		certMap[c.ID] = c
 	}
+	for _, h := range hosts {
+		if h.Enabled && h.CertificateID != nil {
+			if c, ok := certMap[*h.CertificateID]; !ok {
+				return fmt.Errorf("host %d references missing certificate", h.ID)
+			} else if err := certificates.ValidateDomains(c, h.Domains); err != nil {
+				return fmt.Errorf("host %d certificate: %w", h.ID, err)
+			}
+		}
+	}
+	for _, h := range redirects {
+		if h.Enabled && h.CertificateID != nil {
+			if c, ok := certMap[*h.CertificateID]; !ok {
+				return fmt.Errorf("redirect host %d references missing certificate", h.ID)
+			} else if err := certificates.ValidateDomains(c, h.Domains); err != nil {
+				return fmt.Errorf("redirect host %d certificate: %w", h.ID, err)
+			}
+		}
+	}
+	for _, h := range deadHosts {
+		if h.Enabled && h.CertificateID != nil {
+			if c, ok := certMap[*h.CertificateID]; !ok {
+				return fmt.Errorf("404 host %d references missing certificate", h.ID)
+			} else if err := certificates.ValidateDomains(c, h.Domains); err != nil {
+				return fmt.Errorf("404 host %d certificate: %w", h.ID, err)
+			}
+		}
+	}
 
 	dir := filepath.Join(m.dataDir, "nginx")
 	systemDir := filepath.Join(dir, "system")
@@ -500,6 +640,19 @@ func (m *Manager) applyLocked(hostOverride []model.Host) error {
 	}
 	if err := os.MkdirAll(filepath.Join(runtimeDir, "logs"), 0o750); err != nil {
 		return err
+	}
+	for _, path := range []string{
+		filepath.Dir(analyticsLogPath()),
+		filepath.Join(nginxTempDir(), "client_body"),
+		filepath.Join(nginxTempDir(), "proxy"),
+		filepath.Join(nginxTempDir(), "fastcgi"),
+		filepath.Join(nginxTempDir(), "uwsgi"),
+		filepath.Join(nginxTempDir(), "scgi"),
+		proxyCacheDir(),
+	} {
+		if err := os.MkdirAll(path, 0o750); err != nil {
+			return err
+		}
 	}
 
 	runtimePID := m.runtimePIDPath()
@@ -571,24 +724,30 @@ func (m *Manager) writeSafeFallbackLocked() error {
 		return err
 	}
 	conf := fmt.Sprintf(`worker_processes auto;
-error_log %s/logs/openresty-error.log warn;
+error_log %s error;
 pid %s;
 
-events { worker_connections 1024; }
+worker_rlimit_nofile 65535;
+
+events { worker_connections 16384; multi_accept on; }
 
 http {
     server_tokens off;
     access_log off;
-    server { listen 80 default_server; server_name _; return 404; }
+    ssl_session_cache shared:ZentProxySSL:4m;
+    ssl_session_timeout 1h;
+    ssl_buffer_size 4k;
+    server { listen 80 default_server backlog=8192; server_name _; return 404; }
     server {
-        listen 443 ssl default_server;
+        listen 443 ssl default_server backlog=8192;
         server_name _;
         ssl_certificate %s/certs/default/fullchain.pem;
         ssl_certificate_key %s/certs/default/privkey.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
         return 404;
     }
 }
-`, nginxQuote(m.dataDir), nginxQuote(m.runtimePIDPath()), nginxQuote(m.dataDir), nginxQuote(m.dataDir))
+`, nginxQuote(nginxErrorLogPath()), nginxQuote(m.runtimePIDPath()), nginxQuote(m.dataDir), nginxQuote(m.dataDir))
 	path := filepath.Join(dir, "nginx.conf")
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(conf), 0o640); err != nil {
@@ -601,15 +760,33 @@ http {
 	return nil
 }
 
-func (m *Manager) render(hosts []model.Host, redirects []model.RedirectHost, deadHosts []model.DeadHost, streams []model.Stream, accessLists map[int64]model.AccessList, providers map[int64]model.TrustedProxyProvider, certificates map[int64]model.Certificate, zentLoop model.ZentLoopConfig, pidPath string, trustedTransportHops []string) ([]byte, error) {
+func (m *Manager) render(hosts []model.Host, redirects []model.RedirectHost, deadHosts []model.DeadHost, streams []model.Stream, accessLists map[int64]model.AccessList, providers map[int64]model.TrustedProxyProvider, certificateMap map[int64]model.Certificate, zentLoop model.ZentLoopConfig, pidPath string, trustedTransportHops []string) ([]byte, error) {
+	normalizedHosts := make([]model.Host, len(hosts))
+	copy(normalizedHosts, hosts)
+	for i := range normalizedHosts {
+		if !normalizedHosts[i].Enabled {
+			continue
+		}
+		normalized, err := NormalizeStoredHost(normalizedHosts[i])
+		if err != nil {
+			return nil, fmt.Errorf("host %d: %w", normalizedHosts[i].ID, err)
+		}
+		normalizedHosts[i] = normalized
+	}
+	hosts = normalizedHosts
 	var b bytes.Buffer
 	data := nginxQuote(m.dataDir)
 	pid := nginxQuote(pidPath)
 	fmt.Fprintf(&b, `worker_processes auto;
-error_log %s/logs/openresty-error.log warn;
+error_log %s error;
 pid %s;
 
-events { worker_connections 4096; }
+worker_rlimit_nofile 65535;
+
+events {
+    worker_connections 16384;
+    multi_accept on;
+}
 
 http {
     include /usr/local/openresty/nginx/conf/mime.types;
@@ -617,44 +794,44 @@ http {
     server_tokens off;
     sendfile on;
     tcp_nopush on;
-    keepalive_timeout 65;
+    tcp_nodelay on;
+    keepalive_timeout 90;
+    keepalive_requests 1000;
+    reset_timedout_connection on;
     client_max_body_size 0;
-    client_body_temp_path %s/nginx/tmp/client_body;
-    proxy_temp_path %s/nginx/tmp/proxy;
-    fastcgi_temp_path %s/nginx/tmp/fastcgi;
-    uwsgi_temp_path %s/nginx/tmp/uwsgi;
-    scgi_temp_path %s/nginx/tmp/scgi;
+    client_body_buffer_size 128k;
+
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css text/xml application/json application/javascript application/xml image/svg+xml;
+    client_body_temp_path %s/client_body;
+    proxy_temp_path %s/proxy;
+    fastcgi_temp_path %s/fastcgi;
+    uwsgi_temp_path %s/uwsgi;
+    scgi_temp_path %s/scgi;
     resolver 127.0.0.11 valid=30s ipv6=off;
-    proxy_cache_path %s/cache levels=1:2 keys_zone=zentproxy_cache:10m max_size=1g inactive=60m use_temp_path=off;
+    resolver_timeout 2s;
+    proxy_socket_keepalive on;
+    proxy_connect_timeout 5s;
+    proxy_cache_path %s levels=1:2 keys_zone=zentproxy_cache:16m max_size=1g inactive=60m use_temp_path=off;
 
-    # The geo lookup must use $realip_remote_addr, not $remote_addr. The latter
-    # can already be rewritten by ngx_http_realip_module before lazy variables
-    # are evaluated. $realip_remote_addr preserves the original TCP/container
-    # transport peer and therefore lets us reliably identify the Docker/NAT hop.
-    geo $realip_remote_addr $zp_transport_peer {
-        default 0;
-__ZP_TRANSPORT_HOPS__    }
+    # Reuse downstream TLS sessions so Cloudflare and browsers do not need a
+    # full handshake on every new connection. Certificate selection remains
+    # per server_name; this cache only stores negotiated session state.
+    ssl_session_cache shared:ZentProxySSL:20m;
+    ssl_session_timeout 1h;
+    ssl_session_tickets on;
+    ssl_buffer_size 4k;
+    http2_max_concurrent_streams 256;
 
-    # Mark only hosts that explicitly selected Cloudflare as their trusted proxy
-    # provider. This prevents CF-Connecting-IP from being trusted on unrelated
-    # hosts even when they share the same local Docker transport hop.
-    map $host $zp_cloudflare_host {
-        hostnames;
-        default 0;
-__ZP_CLOUDFLARE_HOSTS__    }
-
-    # Canonical client identity. Docker Desktop and similar published-port NAT
-    # can hide Cloudflare's TCP source address behind a local gateway. For hosts
-    # that explicitly selected Cloudflare, CF-Connecting-IP is therefore the
-    # authoritative client identity whenever it is present. Unrelated hosts never
-    # trust this header. The original transport peer remains available separately
-    # for diagnostics and network policy.
-    map "$zp_cloudflare_host:$http_cf_connecting_ip" $zp_client_ip {
-        default $remote_addr;
-        ~^1:.+ $http_cf_connecting_ip;
-    }
-
-    map $zp_client_ip $zp_analytics_ip {
+    # Client identity is native ngx_http_realip output. A provider-specific
+    # header is accepted only when the TCP/transport peer matched that host's
+    # configured set_real_ip_from entries. This keeps direct requests from
+    # spoofing CF-Connecting-IP/X-Forwarded-For while still supporting Docker
+    # Desktop transport hops explicitly trusted for that host.
+    map $remote_addr $zp_analytics_ip {
 __ZP_ANALYTICS_IP_MAP__    }
 
     log_format zentproxy_json escape=json '{"ts":"$time_iso8601","host":"$host","ip":"$zp_analytics_ip","method":"$request_method","path":"$uri","query":"","status":$status,"bytes":$body_bytes_sent,"request_time":"$request_time","upstream_time":"$upstream_response_time","user_agent":"$http_user_agent","referer":"$http_referer","http_version":"$server_protocol","tls_version":"$ssl_protocol","upstream_addr":"$upstream_addr"}';
@@ -664,7 +841,7 @@ __ZP_ANALYTICS_IP_MAP__    }
 
     map $http_upgrade $connection_upgrade {
         default upgrade;
-        '' close;
+        '' '';
     }
 
     map $http_x_forwarded_proto $zp_forwarded_proto {
@@ -690,7 +867,7 @@ __ZP_DEAD_HOSTS__    }
         default 0;
 __ZP_ROOT_DOMAINS__    }
 
-`, data, pid, data, data, data, data, data, data)
+`, nginxQuote(nginxErrorLogPath()), pid, nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(proxyCacheDir()))
 
 	known := map[string]bool{}
 	for _, host := range hosts {
@@ -726,7 +903,7 @@ __ZP_ROOT_DOMAINS__    }
 	for _, domain := range knownDomains {
 		fmt.Fprintf(&knownLines, "        %s 1;\n", domain)
 	}
-	analyticsMap := "        default $zp_client_ip;\n"
+	analyticsMap := "        default $remote_addr;\n"
 	switch m.analyticsIPMode {
 	case "disabled":
 		analyticsMap = "        default \"\";\n"
@@ -758,62 +935,6 @@ __ZP_ROOT_DOMAINS__    }
 	}
 	confHead = strings.Replace(confHead, "__ZP_ROOT_DOMAINS__", rootLines.String(), 1)
 
-	// Resolve Cloudflare trust by requested host name before analytics/proxy
-	// headers are evaluated. This keeps the canonical-IP decision independent of
-	// the real_ip module's rewrite timing.
-	cloudflareDomains := map[string]bool{}
-	for _, host := range hosts {
-		if !host.Enabled || host.TrustedProxyProviderID == nil {
-			continue
-		}
-		p, ok := providers[*host.TrustedProxyProviderID]
-		if !ok || !strings.EqualFold(strings.TrimSpace(p.Header), "CF-Connecting-IP") {
-			continue
-		}
-		for _, domain := range host.Domains {
-			cloudflareDomains[domain] = true
-		}
-	}
-	for _, host := range redirects {
-		if !host.Enabled || host.TrustedProxyProviderID == nil {
-			continue
-		}
-		p, ok := providers[*host.TrustedProxyProviderID]
-		if !ok || !strings.EqualFold(strings.TrimSpace(p.Header), "CF-Connecting-IP") {
-			continue
-		}
-		for _, domain := range host.Domains {
-			cloudflareDomains[domain] = true
-		}
-	}
-	for _, host := range deadHosts {
-		if !host.Enabled || host.TrustedProxyProviderID == nil {
-			continue
-		}
-		p, ok := providers[*host.TrustedProxyProviderID]
-		if !ok || !strings.EqualFold(strings.TrimSpace(p.Header), "CF-Connecting-IP") {
-			continue
-		}
-		for _, domain := range host.Domains {
-			cloudflareDomains[domain] = true
-		}
-	}
-	var cloudflareLines strings.Builder
-	cloudflareNames := make([]string, 0, len(cloudflareDomains))
-	for domain := range cloudflareDomains {
-		cloudflareNames = append(cloudflareNames, domain)
-	}
-	sort.Strings(cloudflareNames)
-	for _, domain := range cloudflareNames {
-		fmt.Fprintf(&cloudflareLines, "        %s 1;\n", domain)
-	}
-	confHead = strings.Replace(confHead, "__ZP_CLOUDFLARE_HOSTS__", cloudflareLines.String(), 1)
-
-	var transportLines strings.Builder
-	for _, cidr := range trustedTransportHops {
-		fmt.Fprintf(&transportLines, "        %s 1;\n", cidr)
-	}
-	confHead = strings.Replace(confHead, "__ZP_TRANSPORT_HOPS__", transportLines.String(), 1)
 	b.Reset()
 	b.WriteString(confHead)
 
@@ -824,14 +945,14 @@ __ZP_ROOT_DOMAINS__    }
 			}
 			routeCIDRs, blockCIDRs, _, _, _, _ := zentLoopRulesForHost(zentLoop, h.ID)
 			if len(routeCIDRs) > 0 {
-				fmt.Fprintf(&b, "    geo $zp_client_ip $zp_zentloop_route_%d {\n        default 0;\n", h.ID)
+				fmt.Fprintf(&b, "    geo $remote_addr $zp_zentloop_route_%d {\n        default 0;\n", h.ID)
 				for _, cidr := range routeCIDRs {
 					fmt.Fprintf(&b, "        %s 1;\n", cidr)
 				}
 				b.WriteString("    }\n\n")
 			}
 			if len(blockCIDRs) > 0 {
-				fmt.Fprintf(&b, "    geo $zp_client_ip $zp_zentloop_block_%d {\n        default 0;\n", h.ID)
+				fmt.Fprintf(&b, "    geo $remote_addr $zp_zentloop_block_%d {\n        default 0;\n", h.ID)
 				for _, cidr := range blockCIDRs {
 					fmt.Fprintf(&b, "        %s 1;\n", cidr)
 				}
@@ -840,27 +961,37 @@ __ZP_ROOT_DOMAINS__    }
 		}
 	}
 
+	// Dedicated upstream pools keep backend connections hot. Hostname targets use
+	// nginx's runtime resolver, so DNS changes do not require a reload and a
+	// temporarily missing backend cannot make the proxy configuration invalid.
+	b.WriteString(renderProxyUpstreams(hosts))
+	if zentLoop.Enabled {
+		b.WriteString("    upstream zp_zentloop_bridge {\n        server 127.0.0.1:18081;\n        keepalive 16;\n        keepalive_requests 1000;\n        keepalive_timeout 60s;\n    }\n\n")
+	}
+
 	// Unknown host handling is deliberately separate from normal upstream failures.
 	fmt.Fprintf(&b, `    server {
-        listen 80 default_server;
+        listen 80 default_server backlog=8192;
         server_name _;
-        access_log %s/logs/access.jsonl zentproxy_json;
+        access_log off;
         location ^~ /.well-known/acme-challenge/ { root %s/acme-webroot; try_files $uri =404; access_log off; }
-`, data, data)
+`, data)
 	if zentLoop.Enabled {
 		if !zentLoop.ForwardUnknownHosts {
 			b.WriteString("        if ($zp_known_root_domain = 0) { return 404; }\n")
 		}
-		b.WriteString(`        location / {
-            proxy_pass http://127.0.0.1:18081;
+		fmt.Fprintf(&b, `        location / {
+            access_log %s zentproxy_json buffer=256k flush=1s;
+            proxy_pass http://zp_zentloop_bridge;
             proxy_http_version 1.1;
+            proxy_set_header Connection "";
             proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $zp_client_ip;
-            proxy_set_header X-Forwarded-For $zp_client_ip;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $remote_addr;
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header X-Forwarded-Host $host;
         }
-`)
+`, nginxQuote(analyticsLogPath()))
 	} else {
 		b.WriteString("        location / { return 404; }\n")
 	}
@@ -868,29 +999,31 @@ __ZP_ROOT_DOMAINS__    }
 
 	// HTTPS catch-all uses a local self-signed certificate only to terminate unknown SNI.
 	fmt.Fprintf(&b, `    server {
-        listen 443 ssl default_server;
+        listen 443 ssl default_server backlog=8192;
         server_name _;
         ssl_certificate %s/certs/default/fullchain.pem;
         ssl_certificate_key %s/certs/default/privkey.pem;
         ssl_protocols TLSv1.2 TLSv1.3;
-        access_log %s/logs/access.jsonl zentproxy_json;
+        access_log off;
         if ($zp_dead_host = 1) { return 404; }
         if ($zp_known_host = 1) { return 421; }
-`, data, data, data)
+`, data, data)
 	if zentLoop.Enabled {
 		if !zentLoop.ForwardUnknownHosts {
 			b.WriteString("        if ($zp_known_root_domain = 0) { return 404; }\n")
 		}
-		b.WriteString(`        location / {
-            proxy_pass http://127.0.0.1:18081;
+		fmt.Fprintf(&b, `        location / {
+            access_log %s zentproxy_json buffer=256k flush=1s;
+            proxy_pass http://zp_zentloop_bridge;
             proxy_http_version 1.1;
+            proxy_set_header Connection "";
             proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $zp_client_ip;
-            proxy_set_header X-Forwarded-For $zp_client_ip;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $remote_addr;
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header X-Forwarded-Host $host;
         }
-`)
+`, nginxQuote(analyticsLogPath()))
 	} else {
 		b.WriteString("        location / { return 404; }\n")
 	}
@@ -900,32 +1033,117 @@ __ZP_ROOT_DOMAINS__    }
 		if !h.Enabled {
 			continue
 		}
-		if err := ValidateStoredHost(h); err != nil {
-			return nil, fmt.Errorf("host %d: %w", h.ID, err)
-		}
-		b.WriteString(renderHost(h, accessLists, providers, certificates, zentLoop, m.dataDir, trustedTransportHops))
+		b.WriteString(renderHost(h, accessLists, providers, certificateMap, zentLoop, m.dataDir, trustedTransportHops))
 	}
 	for _, h := range redirects {
 		if !h.Enabled {
 			continue
 		}
-		b.WriteString(renderRedirectHost(h, providers, certificates, m.dataDir, trustedTransportHops))
+		b.WriteString(renderRedirectHost(h, providers, certificateMap, m.dataDir, trustedTransportHops))
 	}
 	for _, h := range deadHosts {
 		if !h.Enabled {
 			continue
 		}
-		b.WriteString(renderDeadHost(h, providers, certificates, m.dataDir, trustedTransportHops))
+		b.WriteString(renderDeadHost(h, providers, certificateMap, m.dataDir, trustedTransportHops))
 	}
 	b.WriteString("}\n")
 	if len(streams) > 0 {
-		b.WriteString(renderStreams(streams, certificates))
+		b.WriteString(renderStreams(streams, certificateMap))
 	}
 	return b.Bytes(), nil
 }
 
+func NormalizeStoredHost(h model.Host) (model.Host, error) {
+	in, err := NormalizeAndValidate(model.HostInput{Name: h.Name, Domains: h.Domains, Scheme: h.Scheme, ForwardHost: h.ForwardHost, ForwardPort: h.ForwardPort, Enabled: h.Enabled, WebSockets: h.WebSockets, PreserveHost: h.PreserveHost, StatisticsEnabled: h.StatisticsEnabled, StoreQueryString: h.StoreQueryString, TrustedProxyProviderID: h.TrustedProxyProviderID, AccessListID: h.AccessListID, BlockCommonExploits: h.BlockCommonExploits, CertificateID: h.CertificateID, SSLForced: h.SSLForced, HTTP2Support: h.HTTP2Support, HSTSEnabled: h.HSTSEnabled, HSTSSubdomains: h.HSTSSubdomains, CachingEnabled: h.CachingEnabled, TrustForwardedProto: h.TrustForwardedProto, AdvancedConfig: h.AdvancedConfig, CustomLocations: h.CustomLocations})
+	if err != nil {
+		return h, err
+	}
+	h.Name, h.Domains, h.Scheme, h.ForwardHost, h.ForwardPort = in.Name, in.Domains, in.Scheme, in.ForwardHost, in.ForwardPort
+	h.CustomLocations = in.CustomLocations
+	return h, nil
+}
+
 func ValidateStoredHost(h model.Host) error {
-	return ValidateHost(model.HostInput{Name: h.Name, Domains: h.Domains, Scheme: h.Scheme, ForwardHost: h.ForwardHost, ForwardPort: h.ForwardPort, Enabled: h.Enabled, WebSockets: h.WebSockets, PreserveHost: h.PreserveHost, StatisticsEnabled: h.StatisticsEnabled, StoreQueryString: h.StoreQueryString, TrustedProxyProviderID: h.TrustedProxyProviderID, AccessListID: h.AccessListID, BlockCommonExploits: h.BlockCommonExploits, CertificateID: h.CertificateID, SSLForced: h.SSLForced, HTTP2Support: h.HTTP2Support, HSTSEnabled: h.HSTSEnabled, HSTSSubdomains: h.HSTSSubdomains, CachingEnabled: h.CachingEnabled, TrustForwardedProto: h.TrustForwardedProto, AdvancedConfig: h.AdvancedConfig, CustomLocations: h.CustomLocations})
+	_, err := NormalizeStoredHost(h)
+	return err
+}
+
+type proxyUpstream struct {
+	Name   string
+	Host   string
+	Port   int
+	Scheme string
+}
+
+func upstreamName(hostID int64, scheme, host string, port int) string {
+	hash := fnv.New32a()
+	_, _ = fmt.Fprintf(hash, "%s|%s|%d", strings.ToLower(strings.TrimSpace(scheme)), strings.ToLower(strings.TrimSpace(host)), port)
+	return fmt.Sprintf("zp_h%d_%08x", hostID, hash.Sum32())
+}
+
+func effectiveLocationTarget(h model.Host, loc model.CustomLocation) (scheme, host string, port int) {
+	scheme = strings.ToLower(strings.TrimSpace(loc.Scheme))
+	if scheme != "https" {
+		scheme = "http"
+	}
+	host = strings.TrimSpace(loc.ForwardHost)
+	if host == "" {
+		host = strings.TrimSpace(h.ForwardHost)
+	}
+	port = loc.ForwardPort
+	if port < 1 {
+		port = h.ForwardPort
+	}
+	return scheme, host, port
+}
+
+func collectProxyUpstreams(hosts []model.Host) []proxyUpstream {
+	seen := map[string]proxyUpstream{}
+	for _, h := range hosts {
+		if !h.Enabled {
+			continue
+		}
+		locations := append([]model.CustomLocation(nil), h.CustomLocations...)
+		locations = append(locations, model.CustomLocation{Path: "/", Scheme: h.Scheme, ForwardHost: h.ForwardHost, ForwardPort: h.ForwardPort})
+		for _, loc := range locations {
+			scheme, host, port := effectiveLocationTarget(h, loc)
+			if host == "" || port < 1 {
+				continue
+			}
+			name := upstreamName(h.ID, scheme, host, port)
+			seen[name] = proxyUpstream{Name: name, Host: host, Port: port, Scheme: scheme}
+		}
+	}
+	out := make([]proxyUpstream, 0, len(seen))
+	for _, upstream := range seen {
+		out = append(out, upstream)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+func renderProxyUpstreams(hosts []model.Host) string {
+	var b strings.Builder
+	for _, upstream := range collectProxyUpstreams(hosts) {
+		host := strings.TrimSpace(upstream.Host)
+		serverHost := host
+		if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+			if strings.Contains(ip.String(), ":") {
+				serverHost = "[" + ip.String() + "]"
+			} else {
+				serverHost = ip.String()
+			}
+		}
+		fmt.Fprintf(&b, "    upstream %s {\n        zone %s 64k;\n", upstream.Name, upstream.Name)
+		if net.ParseIP(strings.Trim(host, "[]")) == nil {
+			fmt.Fprintf(&b, "        server %s:%d resolve;\n", serverHost, upstream.Port)
+		} else {
+			fmt.Fprintf(&b, "        server %s:%d;\n", serverHost, upstream.Port)
+		}
+		b.WriteString("        keepalive 64;\n        keepalive_requests 1000;\n        keepalive_timeout 60s;\n    }\n\n")
+	}
+	return b.String()
 }
 
 func renderHost(h model.Host, accessLists map[int64]model.AccessList, providers map[int64]model.TrustedProxyProvider, certificates map[int64]model.Certificate, zentLoop model.ZentLoopConfig, dataDir string, trustedTransportHops []string) string {
@@ -969,7 +1187,7 @@ func renderHostServer(h model.Host, accessLists map[int64]model.AccessList, prov
 		if h.StoreQueryString {
 			format = "zentproxy_json_query"
 		}
-		fmt.Fprintf(&b, "        access_log %s/logs/access.jsonl %s;\n", nginxQuote(dataDir), format)
+		fmt.Fprintf(&b, "        access_log %s %s buffer=256k flush=1s;\n", nginxQuote(analyticsLogPath()), format)
 	} else {
 		b.WriteString("        access_log off;\n")
 	}
@@ -1006,7 +1224,7 @@ func renderHostServer(h model.Host, accessLists map[int64]model.AccessList, prov
 			fmt.Fprintf(&b, "        location ^~ %s { return 418; }\n", path)
 		}
 		if len(routeCIDRs)+len(routeExact)+len(routePrefix) > 0 {
-			b.WriteString("        location @zentproxy_zentloop {\n            proxy_pass http://127.0.0.1:18081;\n            proxy_http_version 1.1;\n            proxy_set_header Host $host;\n            proxy_set_header X-Real-IP $zp_client_ip;\n            proxy_set_header X-Forwarded-For $zp_client_ip;\n            proxy_set_header X-Forwarded-Proto $scheme;\n            proxy_set_header X-Forwarded-Host $host;\n            proxy_set_header X-ZentLoop-Catch-All 0;\n        }\n")
+			b.WriteString("        location @zentproxy_zentloop {\n            proxy_pass http://zp_zentloop_bridge;\n            proxy_http_version 1.1;\n            proxy_set_header Host $host;\n            proxy_set_header X-Real-IP $remote_addr;\n            proxy_set_header X-Forwarded-For $remote_addr;\n            proxy_set_header X-Forwarded-Proto $scheme;\n            proxy_set_header X-Forwarded-Host $host;\n            proxy_set_header X-ZentLoop-Catch-All 0;\n        }\n")
 		}
 	}
 	if h.AccessListID != nil {
@@ -1073,6 +1291,18 @@ func renderDefaultLocation(h model.Host, indent string) string {
 	return renderLocation(h, model.CustomLocation{Path: "/", Scheme: h.Scheme, ForwardHost: h.ForwardHost, ForwardPort: h.ForwardPort}, indent)
 }
 
+func proxyUpstreamHostHeader(host string, port int) string {
+	host = strings.TrimSpace(host)
+	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+		if strings.Contains(ip.String(), ":") {
+			host = "[" + ip.String() + "]"
+		} else {
+			host = ip.String()
+		}
+	}
+	return host + ":" + strconv.Itoa(port)
+}
+
 func renderLocation(h model.Host, loc model.CustomLocation, indent string) string {
 	path := strings.TrimSpace(loc.Path)
 	if path == "" {
@@ -1081,26 +1311,13 @@ func renderLocation(h model.Host, loc model.CustomLocation, indent string) strin
 	if strings.ContainsAny(path, "\r\n{};") {
 		return ""
 	}
-	scheme := strings.ToLower(strings.TrimSpace(loc.Scheme))
-	if scheme != "https" {
-		scheme = "http"
-	}
-	host := strings.TrimSpace(loc.ForwardHost)
-	if host == "" {
-		host = h.ForwardHost
-	}
-	port := loc.ForwardPort
-	if port < 1 {
-		port = h.ForwardPort
-	}
-	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil && strings.Contains(ip.String(), ":") {
-		host = "[" + ip.String() + "]"
-	}
+	scheme, host, port := effectiveLocationTarget(h, loc)
 	forwardPath := strings.TrimSpace(loc.ForwardPath)
 	if forwardPath != "" && !strings.HasPrefix(forwardPath, "/") {
 		forwardPath = "/" + forwardPath
 	}
-	upstream := scheme + "://" + host + ":" + strconv.Itoa(port) + forwardPath
+	pool := upstreamName(h.ID, scheme, host, port)
+	upstream := scheme + "://" + pool + forwardPath
 	var b strings.Builder
 	fmt.Fprintf(&b, "%slocation %s {\n", indent, path)
 	fmt.Fprintf(&b, "%s    proxy_pass %s;\n", indent, upstream)
@@ -1108,9 +1325,9 @@ func renderLocation(h model.Host, loc model.CustomLocation, indent string) strin
 	if h.PreserveHost {
 		fmt.Fprintf(&b, "%s    proxy_set_header Host $host;\n", indent)
 	} else {
-		fmt.Fprintf(&b, "%s    proxy_set_header Host $proxy_host;\n", indent)
+		fmt.Fprintf(&b, "%s    proxy_set_header Host %s;\n", indent, proxyUpstreamHostHeader(host, port))
 	}
-	fmt.Fprintf(&b, "%s    proxy_set_header X-Real-IP $zp_client_ip;\n%s    proxy_set_header X-Forwarded-For $zp_client_ip;\n", indent, indent)
+	fmt.Fprintf(&b, "%s    proxy_set_header X-Real-IP $remote_addr;\n%s    proxy_set_header X-Forwarded-For $remote_addr;\n", indent, indent)
 	if h.TrustForwardedProto {
 		fmt.Fprintf(&b, "%s    proxy_set_header X-Forwarded-Proto $zp_forwarded_proto;\n", indent)
 	} else {
@@ -1119,6 +1336,25 @@ func renderLocation(h model.Host, loc model.CustomLocation, indent string) strin
 	fmt.Fprintf(&b, "%s    proxy_set_header X-Forwarded-Host $host;\n", indent)
 	if h.WebSockets {
 		fmt.Fprintf(&b, "%s    proxy_set_header Upgrade $http_upgrade;\n%s    proxy_set_header Connection $connection_upgrade;\n", indent, indent)
+		fmt.Fprintf(&b, "%s    proxy_read_timeout 3600s;\n%s    proxy_send_timeout 3600s;\n", indent, indent)
+	} else {
+		// nginx otherwise sends "Connection: close" to HTTP upstreams, which
+		// prevents the upstream keepalive pool from being reused.
+		fmt.Fprintf(&b, "%s    proxy_set_header Connection \"\";\n", indent)
+	}
+	if scheme == "https" {
+		// Upstream TLS must send a meaningful SNI name. Hostname targets use the
+		// configured backend name. For an IP target with Preserve Host enabled,
+		// the already validated request host is the best SNI identity. Otherwise
+		// SNI stays disabled rather than leaking the internal upstream-pool name.
+		if net.ParseIP(strings.Trim(host, "[]")) == nil {
+			fmt.Fprintf(&b, "%s    proxy_ssl_server_name on;\n%s    proxy_ssl_name %s;\n", indent, indent, host)
+		} else if h.PreserveHost {
+			fmt.Fprintf(&b, "%s    proxy_ssl_server_name on;\n%s    proxy_ssl_name $host;\n", indent, indent)
+		} else {
+			fmt.Fprintf(&b, "%s    proxy_ssl_server_name off;\n", indent)
+		}
+		fmt.Fprintf(&b, "%s    proxy_ssl_session_reuse on;\n", indent)
 	}
 	if h.CachingEnabled {
 		fmt.Fprintf(&b, "%s    proxy_cache zentproxy_cache;\n%s    proxy_cache_valid 200 10m;\n", indent, indent)

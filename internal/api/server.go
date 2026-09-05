@@ -412,11 +412,8 @@ func (s *Server) hostsCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if in.CertificateID != nil {
-		if _, err := s.store.GetCertificate(*in.CertificateID); err != nil {
-			jsonError(w, 422, "certificate does not exist")
-			return
-		}
+	if !s.validateCertificateAssignment(w, in.CertificateID, in.Domains) {
+		return
 	}
 	if in.AccessListID != nil {
 		if _, err := s.store.GetAccessList(*in.AccessListID); err != nil {
@@ -468,11 +465,8 @@ func (s *Server) hostUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if in.CertificateID != nil {
-		if _, err := s.store.GetCertificate(*in.CertificateID); err != nil {
-			jsonError(w, 422, "certificate does not exist")
-			return
-		}
+	if !s.validateCertificateAssignment(w, in.CertificateID, in.Domains) {
+		return
 	}
 	if in.AccessListID != nil {
 		if _, err := s.store.GetAccessList(*in.AccessListID); err != nil {
@@ -851,6 +845,22 @@ func (s *Server) validateTrustedProxyProviderID(w http.ResponseWriter, id *int64
 	return true
 }
 
+func (s *Server) validateCertificateAssignment(w http.ResponseWriter, id *int64, domains []string) bool {
+	if id == nil {
+		return true
+	}
+	c, err := s.store.GetCertificate(*id)
+	if err != nil {
+		jsonError(w, 422, "certificate does not exist")
+		return false
+	}
+	if err := certificates.ValidateDomains(c, domains); err != nil {
+		jsonError(w, 422, err.Error())
+		return false
+	}
+	return true
+}
+
 func (s *Server) redirectHostsList(w http.ResponseWriter, r *http.Request) {
 	v, err := s.store.ListRedirectHosts()
 	if err != nil {
@@ -873,11 +883,8 @@ func (s *Server) redirectHostCreate(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 422, "forward_http_code must be a 3xx status")
 		return
 	}
-	if in.CertificateID != nil {
-		if _, err := s.store.GetCertificate(*in.CertificateID); err != nil {
-			jsonError(w, 422, "certificate does not exist")
-			return
-		}
+	if !s.validateCertificateAssignment(w, in.CertificateID, in.Domains) {
+		return
 	}
 	if !s.validateTrustedProxyProviderID(w, in.TrustedProxyProviderID) {
 		return
@@ -923,11 +930,8 @@ func (s *Server) redirectHostUpdate(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 422, "forward_http_code must be a 3xx status")
 		return
 	}
-	if in.CertificateID != nil {
-		if _, err := s.store.GetCertificate(*in.CertificateID); err != nil {
-			jsonError(w, 422, "certificate does not exist")
-			return
-		}
+	if !s.validateCertificateAssignment(w, in.CertificateID, in.Domains) {
+		return
 	}
 	if !s.validateTrustedProxyProviderID(w, in.TrustedProxyProviderID) {
 		return
@@ -981,11 +985,8 @@ func (s *Server) deadHostCreate(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 422, "domains are required")
 		return
 	}
-	if in.CertificateID != nil {
-		if _, err := s.store.GetCertificate(*in.CertificateID); err != nil {
-			jsonError(w, 422, "certificate does not exist")
-			return
-		}
+	if !s.validateCertificateAssignment(w, in.CertificateID, in.Domains) {
+		return
 	}
 	if !s.validateTrustedProxyProviderID(w, in.TrustedProxyProviderID) {
 		return
@@ -1027,11 +1028,8 @@ func (s *Server) deadHostUpdate(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 422, "domains are required")
 		return
 	}
-	if in.CertificateID != nil {
-		if _, err := s.store.GetCertificate(*in.CertificateID); err != nil {
-			jsonError(w, 422, "certificate does not exist")
-			return
-		}
+	if !s.validateCertificateAssignment(w, in.CertificateID, in.Domains) {
+		return
 	}
 	if !s.validateTrustedProxyProviderID(w, in.TrustedProxyProviderID) {
 		return
