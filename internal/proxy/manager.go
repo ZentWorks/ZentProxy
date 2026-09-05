@@ -1,7 +1,9 @@
 package proxy
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/binary"
 	"errors"
@@ -17,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/ZentWorks/ZentProxy/internal/certificates"
 	"github.com/ZentWorks/ZentProxy/internal/db"
@@ -917,7 +920,7 @@ http {
     fastcgi_temp_path %s/fastcgi;
     uwsgi_temp_path %s/uwsgi;
     scgi_temp_path %s/scgi;
-    resolver 127.0.0.11 valid=30s ipv6=off;
+    resolver %s valid=30s ipv6=off;
     resolver_timeout 2s;
     proxy_socket_keepalive on;
     proxy_connect_timeout 5s;
@@ -973,7 +976,7 @@ __ZP_DEAD_HOSTS__    }
         default 0;
 __ZP_ROOT_DOMAINS__    }
 
-`, nginxQuote(nginxErrorLogPath()), pid, capacity.WorkerConnections, nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(proxyCacheDir()))
+`, nginxQuote(nginxErrorLogPath()), pid, capacity.WorkerConnections, nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), strings.Join(runtimeResolvers(), " "), nginxQuote(proxyCacheDir()))
 
 	known := map[string]bool{}
 	for _, host := range hosts {
@@ -1247,20 +1250,177 @@ func collectProxyUpstreams(hosts []model.Host) []proxyUpstream {
 	return out
 }
 
+func normalizeResolverIP(raw string) string {
+	ip := net.ParseIP(strings.TrimSpace(raw))
+	if ip == nil {
+		return ""
+	}
+	if strings.Contains(ip.String(), ":") {
+		return "[" + ip.String() + "]"
+	}
+	return ip.String()
+}
+
+func nginxResolverAddresses(path string) []string {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	seen := map[string]struct{}{}
+	var out []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "nameserver" {
+			continue
+		}
+		value := normalizeResolverIP(fields[1])
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func runtimeResolvers() []string {
+	if values := nginxResolverAddresses("/etc/resolv.conf"); len(values) > 0 {
+		return values
+	}
+	// Docker's embedded DNS is the safest fallback inside the supported
+	// container deployment. This is used only when resolv.conf is unavailable.
+	return []string{"127.0.0.11"}
+}
+
+func hostsFileAddress(path, hostname string) (string, bool) {
+	hostname = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(hostname), "."))
+	if hostname == "" {
+		return "", false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if idx := strings.IndexByte(line, '#'); idx >= 0 {
+			line = line[:idx]
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		ip := net.ParseIP(fields[0])
+		if ip == nil {
+			continue
+		}
+		for _, alias := range fields[1:] {
+			if strings.EqualFold(strings.TrimSuffix(alias, "."), hostname) {
+				return ip.String(), true
+			}
+		}
+	}
+	return "", false
+}
+
+func systemPinnedUpstreamAddressWith(host, hostsPath string, lookup func(string) ([]net.IP, error)) (string, bool) {
+	host = strings.TrimSuffix(strings.TrimSpace(host), ".")
+	if host == "" || net.ParseIP(strings.Trim(host, "[]")) != nil {
+		return "", false
+	}
+
+	// Explicit /etc/hosts entries (including Docker extra_hosts) must use the
+	// system resolver path. nginx's asynchronous resolver deliberately bypasses
+	// /etc/hosts and would otherwise return 502 while curl in the same container
+	// succeeds.
+	if ip, ok := hostsFileAddress(hostsPath, host); ok {
+		return ip, true
+	}
+
+	// Docker Desktop exposes these special names through its host resolver. They
+	// are not ordinary service-discovery records and can differ from what the
+	// nginx async resolver sees, so resolve them once when building the config.
+	lower := strings.ToLower(host)
+	if lower == "host.docker.internal" || lower == "gateway.docker.internal" || strings.HasSuffix(lower, ".docker.internal") {
+		ips, err := lookup(host)
+		if err != nil || len(ips) == 0 {
+			return "", false
+		}
+		// Prefer IPv4 because Docker Desktop's host gateway is normally exposed
+		// over IPv4. IPv6 remains supported when it is the only available family.
+		for _, ip := range ips {
+			if v4 := ip.To4(); v4 != nil {
+				return v4.String(), true
+			}
+		}
+		return ips[0].String(), true
+	}
+	return "", false
+}
+
+func lookupSystemIPs(host string) ([]net.IP, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	ips := make([]net.IP, 0, len(addrs))
+	for _, addr := range addrs {
+		ips = append(ips, addr.IP)
+	}
+	return ips, nil
+}
+
+func systemPinnedUpstreamAddress(host string) (string, bool) {
+	return systemPinnedUpstreamAddressWith(host, "/etc/hosts", lookupSystemIPs)
+}
+
+func nginxServerHost(host string) string {
+	host = strings.TrimSpace(host)
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	if ip == nil {
+		return host
+	}
+	if strings.Contains(ip.String(), ":") {
+		return "[" + ip.String() + "]"
+	}
+	return ip.String()
+}
+
 func renderProxyUpstreams(upstreams []proxyUpstream, keepalive int) string {
 	var b strings.Builder
 	for _, upstream := range upstreams {
 		host := strings.TrimSpace(upstream.Host)
-		serverHost := host
-		if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
-			if strings.Contains(ip.String(), ":") {
-				serverHost = "[" + ip.String() + "]"
+		serverHost := nginxServerHost(host)
+		dynamicResolve := false
+
+		if net.ParseIP(strings.Trim(host, "[]")) == nil {
+			if pinned, ok := systemPinnedUpstreamAddress(host); ok {
+				serverHost = nginxServerHost(pinned)
 			} else {
-				serverHost = ip.String()
+				// Ordinary Docker service names and DNS names stay dynamically
+				// resolvable so container/IP changes do not require a ZentProxy
+				// restart.
+				dynamicResolve = true
 			}
 		}
+
 		fmt.Fprintf(&b, "    upstream %s {\n        zone %s 64k;\n", upstream.Name, upstream.Name)
-		if net.ParseIP(strings.Trim(host, "[]")) == nil {
+		if dynamicResolve {
 			fmt.Fprintf(&b, "        server %s:%d resolve;\n", serverHost, upstream.Port)
 		} else {
 			fmt.Fprintf(&b, "        server %s:%d;\n", serverHost, upstream.Port)
