@@ -3,6 +3,10 @@ services:
     image: ghcr.io/zentworks/zentproxy:latest
     container_name: zentproxy
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     ports:
       - "80:80/tcp"
       - "443:443/tcp"

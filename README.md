@@ -79,6 +79,11 @@ services:
     container_name: zentproxy
     restart: unless-stopped
 
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+
     env_file:
       - .env
 
@@ -129,6 +134,7 @@ Create `.env` as shown above and run:
 docker run -d \
   --name zentproxy \
   --restart unless-stopped \
+  --ulimit nofile=65535:65535 \
   --env-file .env \
   -p 80:80 \
   -p 443:443 \
@@ -151,6 +157,7 @@ Environment variables can also be supplied directly with `-e`:
 docker run -d \
   --name zentproxy \
   --restart unless-stopped \
+  --ulimit nofile=65535:65535 \
   -p 80:80 \
   -p 443:443 \
   -p 8080:8080 \
@@ -169,6 +176,8 @@ docker run -d \
 ```
 
 Replace `admin@example.com` with the real administrator e-mail address before starting the container.
+
+`--ulimit nofile=65535:65535` is recommended for production traffic. ZentProxy still detects lower custom runtime limits and automatically scales `worker_connections` and upstream keepalive caches down instead of generating an unusable OpenResty capacity.
 
 If the admin port is changed, the Docker port mapping must be changed as well. For example:
 

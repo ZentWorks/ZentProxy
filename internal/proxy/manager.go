@@ -28,7 +28,82 @@ type Manager struct {
 	dataDir              string
 	trustedTransportHops []string
 	analyticsIPMode      string
+	nofileLimit          uint64
 	mu                   sync.Mutex
+}
+
+type runtimeCapacity struct {
+	WorkerConnections    int
+	KeepalivePerUpstream int
+	ZentLoopKeepalive    int
+}
+
+func currentOpenFileLimit() uint64 {
+	var limit syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &limit); err == nil && limit.Cur > 0 {
+		return limit.Cur
+	}
+	return 1024
+}
+
+func computeRuntimeCapacity(nofile uint64, upstreamPools int) runtimeCapacity {
+	if nofile == 0 {
+		nofile = 1024
+	}
+	// Keep a small file-descriptor reserve for listeners, logs, DNS sockets and
+	// other process internals. worker_connections counts client and upstream
+	// connections, so it must stay below the inherited RLIMIT_NOFILE.
+	reserve := nofile / 16
+	if reserve < 64 {
+		reserve = 64
+	}
+	available := nofile
+	if available > reserve {
+		available -= reserve
+	} else {
+		available = nofile / 2
+	}
+	if available > 16384 {
+		available = 16384
+	}
+	if available < 64 {
+		available = nofile
+	}
+	workerConnections := int(available)
+	if workerConnections < 1 {
+		workerConnections = 1
+	}
+
+	if upstreamPools < 1 {
+		upstreamPools = 1
+	}
+	idleBudget := workerConnections / 4
+	if idleBudget < 1 {
+		idleBudget = 1
+	}
+	keepalive := idleBudget / upstreamPools
+	if keepalive < 1 {
+		keepalive = 1
+	}
+	if keepalive > 64 {
+		keepalive = 64
+	}
+	zentLoopKeepalive := keepalive
+	if zentLoopKeepalive > 16 {
+		zentLoopKeepalive = 16
+	}
+	return runtimeCapacity{
+		WorkerConnections:    workerConnections,
+		KeepalivePerUpstream: keepalive,
+		ZentLoopKeepalive:    zentLoopKeepalive,
+	}
+}
+
+func (m *Manager) effectiveNofileLimit() uint64 {
+	if m.nofileLimit > 0 {
+		return m.nofileLimit
+	}
+	return currentOpenFileLimit()
 }
 
 func runtimeWorkDir() string {
@@ -62,7 +137,7 @@ func NewManager(store *db.Store, dataDir string, analyticsIPMode ...string) *Man
 			mode = strings.ToLower(strings.TrimSpace(analyticsIPMode[0]))
 		}
 	}
-	return &Manager{store: store, dataDir: dataDir, trustedTransportHops: detectTrustedTransportHops(), analyticsIPMode: mode}
+	return &Manager{store: store, dataDir: dataDir, trustedTransportHops: detectTrustedTransportHops(), analyticsIPMode: mode, nofileLimit: currentOpenFileLimit()}
 }
 
 func detectTrustedTransportHops() []string {
@@ -351,6 +426,26 @@ func (m *Manager) runtimePIDPath() string {
 	return filepath.Join(m.dataDir, "nginx", "system", "openresty.pid")
 }
 
+func (m *Manager) startupReadyPath() string {
+	return filepath.Join(m.dataDir, "nginx", "system", "proxy-config.ready")
+}
+
+func (m *Manager) markStartupReadyLocked() error {
+	path := m.startupReadyPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte("ready\n"), 0o640); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
 func (m *Manager) testPIDPath() string {
 	return filepath.Join(m.dataDir, "nginx", "system", "openresty-test.pid")
 }
@@ -466,10 +561,16 @@ func (m *Manager) ApplyStartup() ([]string, error) {
 
 	path := filepath.Join(m.dataDir, "nginx", "nginx.conf")
 	if info, statErr := os.Stat(path); statErr == nil && info.Size() > 0 && m.existingConfigValidLocked(path) {
+		if readyErr := m.markStartupReadyLocked(); readyErr != nil {
+			return nil, fmt.Errorf("%v; last-known-good config is valid but startup readiness could not be published: %w", initialErr, readyErr)
+		}
 		return nil, initialErr
 	}
 	if fallbackErr := m.writeSafeFallbackLocked(); fallbackErr != nil {
 		return nil, fmt.Errorf("%v; safe startup fallback failed: %w", initialErr, fallbackErr)
+	}
+	if readyErr := m.markStartupReadyLocked(); readyErr != nil {
+		return nil, fmt.Errorf("%v; safe startup fallback is ready but startup readiness could not be published: %w", initialErr, readyErr)
 	}
 	return nil, initialErr
 }
@@ -703,6 +804,9 @@ func (m *Manager) applyLocked(hostOverride []model.Host) error {
 			return fmt.Errorf("proxy reload failed: %v: %s", err, strings.TrimSpace(string(out)))
 		}
 	}
+	if err := m.markStartupReadyLocked(); err != nil {
+		return fmt.Errorf("proxy configuration activated but startup readiness could not be published: %w", err)
+	}
 	return nil
 }
 
@@ -723,13 +827,12 @@ func (m *Manager) writeSafeFallbackLocked() error {
 	if err := os.MkdirAll(filepath.Join(dir, "runtime", "logs"), 0o750); err != nil {
 		return err
 	}
+	capacity := computeRuntimeCapacity(m.effectiveNofileLimit(), 1)
 	conf := fmt.Sprintf(`worker_processes auto;
 error_log %s error;
 pid %s;
 
-worker_rlimit_nofile 65535;
-
-events { worker_connections 16384; multi_accept on; }
+events { worker_connections %d; }
 
 http {
     server_tokens off;
@@ -747,7 +850,7 @@ http {
         return 404;
     }
 }
-`, nginxQuote(nginxErrorLogPath()), nginxQuote(m.runtimePIDPath()), nginxQuote(m.dataDir), nginxQuote(m.dataDir))
+`, nginxQuote(nginxErrorLogPath()), nginxQuote(m.runtimePIDPath()), capacity.WorkerConnections, nginxQuote(m.dataDir), nginxQuote(m.dataDir))
 	path := filepath.Join(dir, "nginx.conf")
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(conf), 0o640); err != nil {
@@ -774,6 +877,12 @@ func (m *Manager) render(hosts []model.Host, redirects []model.RedirectHost, dea
 		normalizedHosts[i] = normalized
 	}
 	hosts = normalizedHosts
+	proxyUpstreams := collectProxyUpstreams(hosts)
+	poolCount := len(proxyUpstreams)
+	if zentLoop.Enabled {
+		poolCount++
+	}
+	capacity := computeRuntimeCapacity(m.effectiveNofileLimit(), poolCount)
 	var b bytes.Buffer
 	data := nginxQuote(m.dataDir)
 	pid := nginxQuote(pidPath)
@@ -781,11 +890,8 @@ func (m *Manager) render(hosts []model.Host, redirects []model.RedirectHost, dea
 error_log %s error;
 pid %s;
 
-worker_rlimit_nofile 65535;
-
 events {
-    worker_connections 16384;
-    multi_accept on;
+    worker_connections %d;
 }
 
 http {
@@ -867,7 +973,7 @@ __ZP_DEAD_HOSTS__    }
         default 0;
 __ZP_ROOT_DOMAINS__    }
 
-`, nginxQuote(nginxErrorLogPath()), pid, nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(proxyCacheDir()))
+`, nginxQuote(nginxErrorLogPath()), pid, capacity.WorkerConnections, nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(nginxTempDir()), nginxQuote(proxyCacheDir()))
 
 	known := map[string]bool{}
 	for _, host := range hosts {
@@ -964,9 +1070,9 @@ __ZP_ROOT_DOMAINS__    }
 	// Dedicated upstream pools keep backend connections hot. Hostname targets use
 	// nginx's runtime resolver, so DNS changes do not require a reload and a
 	// temporarily missing backend cannot make the proxy configuration invalid.
-	b.WriteString(renderProxyUpstreams(hosts))
+	b.WriteString(renderProxyUpstreams(proxyUpstreams, capacity.KeepalivePerUpstream))
 	if zentLoop.Enabled {
-		b.WriteString("    upstream zp_zentloop_bridge {\n        server 127.0.0.1:18081;\n        keepalive 16;\n        keepalive_requests 1000;\n        keepalive_timeout 60s;\n    }\n\n")
+		fmt.Fprintf(&b, "    upstream zp_zentloop_bridge {\n        server 127.0.0.1:18081;\n        keepalive %d;\n        keepalive_requests 1000;\n        keepalive_timeout 60s;\n    }\n\n", capacity.ZentLoopKeepalive)
 	}
 
 	// Unknown host handling is deliberately separate from normal upstream failures.
@@ -1070,16 +1176,33 @@ func ValidateStoredHost(h model.Host) error {
 }
 
 type proxyUpstream struct {
-	Name   string
-	Host   string
-	Port   int
-	Scheme string
+	Name          string
+	Host          string
+	Port          int
+	Scheme        string
+	KeepaliveSafe bool
 }
 
-func upstreamName(hostID int64, scheme, host string, port int) string {
+func upstreamPoolIdentity(h model.Host, scheme, host string, port int) (string, bool) {
+	scheme = strings.ToLower(strings.TrimSpace(scheme))
+	host = strings.ToLower(strings.TrimSpace(host))
+	base := fmt.Sprintf("%s|%s|%d", scheme, host, port)
+	// HTTPS to an IP while Preserve Host is enabled derives SNI from $host.
+	// A keepalive connection established for one frontend hostname must never be
+	// reused for another hostname/SNI, so keep this case host-local and disable
+	// idle connection reuse for the pool. Static backend SNI/HTTP pools are safe
+	// to share across Proxy Hosts that target the exact same backend.
+	if scheme == "https" && net.ParseIP(strings.Trim(host, "[]")) != nil && h.PreserveHost {
+		return fmt.Sprintf("%s|dynamic-sni|host:%d", base, h.ID), false
+	}
+	return base, true
+}
+
+func upstreamName(h model.Host, scheme, host string, port int) string {
+	identity, _ := upstreamPoolIdentity(h, scheme, host, port)
 	hash := fnv.New32a()
-	_, _ = fmt.Fprintf(hash, "%s|%s|%d", strings.ToLower(strings.TrimSpace(scheme)), strings.ToLower(strings.TrimSpace(host)), port)
-	return fmt.Sprintf("zp_h%d_%08x", hostID, hash.Sum32())
+	_, _ = hash.Write([]byte(identity))
+	return fmt.Sprintf("zp_u_%08x", hash.Sum32())
 }
 
 func effectiveLocationTarget(h model.Host, loc model.CustomLocation) (scheme, host string, port int) {
@@ -1111,8 +1234,9 @@ func collectProxyUpstreams(hosts []model.Host) []proxyUpstream {
 			if host == "" || port < 1 {
 				continue
 			}
-			name := upstreamName(h.ID, scheme, host, port)
-			seen[name] = proxyUpstream{Name: name, Host: host, Port: port, Scheme: scheme}
+			identity, keepaliveSafe := upstreamPoolIdentity(h, scheme, host, port)
+			name := upstreamName(h, scheme, host, port)
+			seen[identity] = proxyUpstream{Name: name, Host: host, Port: port, Scheme: scheme, KeepaliveSafe: keepaliveSafe}
 		}
 	}
 	out := make([]proxyUpstream, 0, len(seen))
@@ -1123,9 +1247,9 @@ func collectProxyUpstreams(hosts []model.Host) []proxyUpstream {
 	return out
 }
 
-func renderProxyUpstreams(hosts []model.Host) string {
+func renderProxyUpstreams(upstreams []proxyUpstream, keepalive int) string {
 	var b strings.Builder
-	for _, upstream := range collectProxyUpstreams(hosts) {
+	for _, upstream := range upstreams {
 		host := strings.TrimSpace(upstream.Host)
 		serverHost := host
 		if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
@@ -1141,7 +1265,10 @@ func renderProxyUpstreams(hosts []model.Host) string {
 		} else {
 			fmt.Fprintf(&b, "        server %s:%d;\n", serverHost, upstream.Port)
 		}
-		b.WriteString("        keepalive 64;\n        keepalive_requests 1000;\n        keepalive_timeout 60s;\n    }\n\n")
+		if upstream.KeepaliveSafe && keepalive > 0 {
+			fmt.Fprintf(&b, "        keepalive %d;\n        keepalive_requests 1000;\n        keepalive_timeout 60s;\n", keepalive)
+		}
+		b.WriteString("    }\n\n")
 	}
 	return b.String()
 }
@@ -1316,7 +1443,7 @@ func renderLocation(h model.Host, loc model.CustomLocation, indent string) strin
 	if forwardPath != "" && !strings.HasPrefix(forwardPath, "/") {
 		forwardPath = "/" + forwardPath
 	}
-	pool := upstreamName(h.ID, scheme, host, port)
+	pool := upstreamName(h, scheme, host, port)
 	upstream := scheme + "://" + pool + forwardPath
 	var b strings.Builder
 	fmt.Fprintf(&b, "%slocation %s {\n", indent, path)
@@ -1345,16 +1472,19 @@ func renderLocation(h model.Host, loc model.CustomLocation, indent string) strin
 	if scheme == "https" {
 		// Upstream TLS must send a meaningful SNI name. Hostname targets use the
 		// configured backend name. For an IP target with Preserve Host enabled,
-		// the already validated request host is the best SNI identity. Otherwise
-		// SNI stays disabled rather than leaking the internal upstream-pool name.
+		// the already validated request host is the best SNI identity. That value
+		// can vary per request, so both idle connection reuse and TLS session reuse
+		// are disabled for this special case to prevent cross-host SNI reuse.
 		if net.ParseIP(strings.Trim(host, "[]")) == nil {
 			fmt.Fprintf(&b, "%s    proxy_ssl_server_name on;\n%s    proxy_ssl_name %s;\n", indent, indent, host)
+			fmt.Fprintf(&b, "%s    proxy_ssl_session_reuse on;\n", indent)
 		} else if h.PreserveHost {
 			fmt.Fprintf(&b, "%s    proxy_ssl_server_name on;\n%s    proxy_ssl_name $host;\n", indent, indent)
+			fmt.Fprintf(&b, "%s    proxy_ssl_session_reuse off;\n", indent)
 		} else {
 			fmt.Fprintf(&b, "%s    proxy_ssl_server_name off;\n", indent)
+			fmt.Fprintf(&b, "%s    proxy_ssl_session_reuse on;\n", indent)
 		}
-		fmt.Fprintf(&b, "%s    proxy_ssl_session_reuse on;\n", indent)
 	}
 	if h.CachingEnabled {
 		fmt.Fprintf(&b, "%s    proxy_cache zentproxy_cache;\n%s    proxy_cache_valid 200 10m;\n", indent, indent)
