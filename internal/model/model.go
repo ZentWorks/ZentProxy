@@ -241,6 +241,7 @@ type TrustedProxyProvider struct {
 	SourceIPv6  string     `json:"source_ipv6,omitempty"`
 	CIDRs       []string   `json:"cidrs"`
 	LastChecked *time.Time `json:"last_checked,omitempty"`
+	NextCheck   *time.Time `json:"next_check,omitempty"`
 	LastChanged *time.Time `json:"last_changed,omitempty"`
 	LastError   string     `json:"last_error,omitempty"`
 }
@@ -296,16 +297,17 @@ type RawRequest struct {
 	ZentLoop       bool      `json:"zentloop"`
 }
 type StatsSummary struct {
-	Since         time.Time        `json:"since"`
-	Requests      int64            `json:"requests"`
-	UniqueIPs     int64            `json:"unique_ips"`
-	Bytes         int64            `json:"bytes"`
-	Errors        int64            `json:"errors"`
-	AverageTimeMS float64          `json:"average_time_ms"`
-	StatusClasses map[string]int64 `json:"status_classes"`
-	TopHosts      []CountItem      `json:"top_hosts"`
-	TopPaths      []CountItem      `json:"top_paths"`
-	TopIPs        []CountItem      `json:"top_ips"`
+	Since                 time.Time        `json:"since"`
+	Requests              int64            `json:"requests"`
+	UniqueIPs             int64            `json:"unique_ips"`
+	Bytes                 int64            `json:"bytes"`
+	Errors                int64            `json:"errors"`
+	AverageTimeMS         float64          `json:"average_time_ms"`
+	AverageUpstreamTimeMS float64          `json:"average_upstream_time_ms"`
+	StatusClasses         map[string]int64 `json:"status_classes"`
+	TopHosts              []CountItem      `json:"top_hosts"`
+	TopPaths              []CountItem      `json:"top_paths"`
+	TopIPs                []CountItem      `json:"top_ips"`
 }
 type CountItem struct {
 	Key   string `json:"key"`

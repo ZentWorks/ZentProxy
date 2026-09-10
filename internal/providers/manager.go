@@ -16,11 +16,13 @@ import (
 )
 
 type Manager struct {
-	store    *db.Store
-	client   *http.Client
-	every    time.Duration
-	onChange func() error
-	mu       sync.Mutex
+	store      *db.Store
+	client     *http.Client
+	every      time.Duration
+	onChange   func() error
+	mu         sync.Mutex
+	scheduleMu sync.RWMutex
+	nextCheck  time.Time
 }
 
 func New(store *db.Store, every time.Duration, onChange func() error) *Manager {
@@ -30,17 +32,37 @@ func New(store *db.Store, every time.Duration, onChange func() error) *Manager {
 func (m *Manager) Start(ctx context.Context) {
 	go func() {
 		m.RefreshAll(ctx)
-		t := time.NewTicker(m.every)
-		defer t.Stop()
 		for {
+			next := time.Now().Add(m.every)
+			m.setNextCheck(next)
+			t := time.NewTimer(time.Until(next))
 			select {
 			case <-ctx.Done():
+				if !t.Stop() {
+					<-t.C
+				}
 				return
 			case <-t.C:
 				m.RefreshAll(ctx)
 			}
 		}
 	}()
+}
+
+func (m *Manager) setNextCheck(t time.Time) {
+	m.scheduleMu.Lock()
+	m.nextCheck = t.UTC()
+	m.scheduleMu.Unlock()
+}
+
+func (m *Manager) NextCheck() *time.Time {
+	m.scheduleMu.RLock()
+	t := m.nextCheck
+	m.scheduleMu.RUnlock()
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
 
 func (m *Manager) RefreshAll(ctx context.Context) {

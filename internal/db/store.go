@@ -1406,7 +1406,7 @@ func (s *Store) RecentRequests(since time.Time, host, zentloop string, limit int
 }
 
 func (s *Store) StatsSummary(since time.Time, host, zentloop string) (model.StatsSummary, error) {
-	out := model.StatsSummary{Since: since.UTC(), StatusClasses: map[string]int64{"2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0}, TopHosts: []model.CountItem{}, TopPaths: []model.CountItem{}, TopIPs: []model.CountItem{}}
+	out := model.StatsSummary{Since: since.UTC(), StatusClasses: map[string]int64{"1xx": 0, "2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0}, TopHosts: []model.CountItem{}, TopPaths: []model.CountItem{}, TopIPs: []model.CountItem{}}
 	where := "at>=?"
 	args := []any{since.UTC().Format(time.RFC3339Nano)}
 	if host != "" {
@@ -1418,12 +1418,13 @@ func (s *Store) StatsSummary(since time.Time, host, zentloop string) (model.Stat
 	} else if zentloop == "without" {
 		where += " AND zentloop=0"
 	}
-	q := `SELECT COUNT(*),COUNT(DISTINCT ip),COALESCE(SUM(bytes),0),COALESCE(SUM(CASE WHEN status>=400 THEN 1 ELSE 0 END),0),COALESCE(AVG(request_time_ms),0),
-	COALESCE(SUM(CASE WHEN status BETWEEN 200 AND 299 THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status BETWEEN 300 AND 399 THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status BETWEEN 400 AND 499 THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status>=500 THEN 1 ELSE 0 END),0) FROM raw_requests WHERE ` + where
-	var c2, c3, c4, c5 int64
-	if err := s.db.QueryRow(q, args...).Scan(&out.Requests, &out.UniqueIPs, &out.Bytes, &out.Errors, &out.AverageTimeMS, &c2, &c3, &c4, &c5); err != nil {
+	q := `SELECT COUNT(*),COUNT(DISTINCT ip),COALESCE(SUM(bytes),0),COALESCE(SUM(CASE WHEN status>=400 THEN 1 ELSE 0 END),0),COALESCE(AVG(CASE WHEN status <> 101 THEN request_time_ms END),0),COALESCE(AVG(CASE WHEN status <> 101 AND upstream_time_ms IS NOT NULL THEN upstream_time_ms END),0),
+	COALESCE(SUM(CASE WHEN status BETWEEN 100 AND 199 THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status BETWEEN 200 AND 299 THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status BETWEEN 300 AND 399 THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status BETWEEN 400 AND 499 THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status>=500 THEN 1 ELSE 0 END),0) FROM raw_requests WHERE ` + where
+	var c1, c2, c3, c4, c5 int64
+	if err := s.db.QueryRow(q, args...).Scan(&out.Requests, &out.UniqueIPs, &out.Bytes, &out.Errors, &out.AverageTimeMS, &out.AverageUpstreamTimeMS, &c1, &c2, &c3, &c4, &c5); err != nil {
 		return out, err
 	}
+	out.StatusClasses["1xx"] = c1
 	out.StatusClasses["2xx"] = c2
 	out.StatusClasses["3xx"] = c3
 	out.StatusClasses["4xx"] = c4

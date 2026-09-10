@@ -1341,6 +1341,14 @@ func (s *Server) providersList(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 500, "cannot list providers")
 		return
 	}
+	if s.providers != nil {
+		next := s.providers.NextCheck()
+		for i := range v {
+			if v[i].AutoUpdate {
+				v[i].NextCheck = next
+			}
+		}
+	}
 	writeJSON(w, 200, v)
 }
 

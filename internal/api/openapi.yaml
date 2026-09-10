@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: ZentProxy API
-  version: 0.7.19
+  version: 0.7.20
   description: Versioned API for ZentProxy proxy management, certificates, routing, analytics, trusted proxies, integrations, user preferences and migration tooling.
 servers:
   - url: /api/v1
@@ -93,6 +93,20 @@ components:
           minItems: 1
           items: { type: string, description: IPv4/IPv6 address or CIDR }
           example: [10.0.0.10, 192.168.1.0/24]
+    TrustedProxyProvider:
+      type: object
+      properties:
+        id: { type: integer }
+        slug: { type: string }
+        name: { type: string }
+        kind: { type: string }
+        header: { type: string }
+        auto_update: { type: boolean }
+        cidrs: { type: array, items: { type: string } }
+        last_checked: { type: [string, 'null'], format: date-time }
+        next_check: { type: [string, 'null'], format: date-time, description: Next scheduled automatic provider refresh }
+        last_changed: { type: [string, 'null'], format: date-time }
+        last_error: { type: string }
     ZentLoopIPList:
       type: object
       required: [name, entries]
@@ -551,7 +565,10 @@ paths:
     get:
       tags: [Trusted Proxies]
       summary: List trusted proxy providers
-      responses: { '200': { description: OK } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/TrustedProxyProvider' } } } }
     post:
       tags: [Trusted Proxies]
       summary: Create a custom trusted proxy provider

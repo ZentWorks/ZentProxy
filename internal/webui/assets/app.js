@@ -7,7 +7,7 @@ const tr = (s) => window.ZentI18n ? ZentI18n.t(s) : s;
 const localize = (root=document) => window.ZentI18n && ZentI18n.apply(root);
 const pageIcons = { dashboard:'overview', hosts:'proxy-hosts', certificates:'certificates', routing:'routing', access:'access', analytics:'analytics', providers:'trusted-proxies', zentloop:'zentloop', migration:'migration', developers:'developer', documentation:'documentation', audit:'audit' };
 function icon(name, cls='') { return `<svg class="ui-icon ${esc(cls)}" aria-hidden="true"><use href="/icons.svg#${esc(name)}"></use></svg>`; }
-function metric(iconName, label, value) { return `<div class="card metric metric-with-icon"><span class="metric-icon">${icon(iconName)}</span><div class="metric-copy"><div class="label">${label}</div><div class="value">${value}</div></div></div>`; }
+function metric(iconName, label, value, detail='') { return `<div class="card metric metric-with-icon"><span class="metric-icon">${icon(iconName)}</span><div class="metric-copy"><div class="label">${label}</div><div class="value">${value}</div>${detail ? `<div class="tiny muted">${detail}</div>` : ''}</div></div>`; }
 function sectionHeading(iconName, title, extra='') { return `<div class="section-head"><h2 class="section-title"><span class="section-icon">${icon(iconName)}</span>${title}</h2>${extra}</div>`; }
 function emptyState(iconName, text) { return `<div class="empty empty-with-icon"><span class="empty-icon">${icon(iconName)}</span><span>${text}</span></div>`; }
 
@@ -73,7 +73,7 @@ const state = {
 
 const titles = {
   dashboard: ['Overview', 'Traffic, health and the things that matter.'],
-  hosts: ['Proxy Hosts', 'Domains and upstreams without config-file archaeology.'],
+  hosts: ['Proxy Hosts', ''],
   certificates: ['Certificates', "Let's Encrypt, automatic renewal and imported certificates."],
   routing: ['Routing', 'Redirects, 404 hosts and TCP/UDP streams.'],
   access: ['Access Lists', 'Reusable IP rules and authentication policies for proxy hosts.'],
@@ -83,7 +83,7 @@ const titles = {
   migration: ['Migration', 'Analyze first, then move the full supported configuration into ZentProxy.'],
   developers: ['Developer API', 'Scoped API keys and a stable versioned interface.'],
   audit: ['Audit Log', 'Who changed what and when.'],
-  documentation: ['Documentation', 'Search and read the ZentProxy documentation without leaving the WebUI.'],
+  documentation: ['Documentation', ''],
 };
 
 async function api(path, opt = {}) {
@@ -285,7 +285,7 @@ async function dashboard() {
     </div>
     <div class="grid-2">
       <div class="card">${sectionHeading('proxy-hosts', 'Top hosts', '<span class="pill">24h</span>')}${countList(arr(stats.top_hosts))}</div>
-      <div class="card">${sectionHeading('status', 'Status codes', `<span class="pill">${esc(tr('Avg'))} ${num(stats.average_time_ms).toFixed(1)} ms</span>`)}${statusBars(obj(stats.status_classes), num(stats.requests))}</div>
+      <div class="card">${sectionHeading('status', 'Status codes', `<span class="pill">${esc(tr('Avg'))} ${num(stats.average_time_ms).toFixed(1)} ms · ${esc(tr('Upstream'))} ${num(stats.average_upstream_time_ms).toFixed(1)} ms</span>`)}${statusBars(obj(stats.status_classes), num(stats.requests))}</div>
     </div>
     <div class="grid-2">
       <div class="card">${sectionHeading('paths', 'Top paths')}${countList(arr(stats.top_paths))}</div>
@@ -305,7 +305,7 @@ function domainCountList(items) {
 }
 function statusBars(s, total) {
   s = obj(s); total = num(total);
-  return ['2xx', '3xx', '4xx', '5xx'].map((k) => {
+  return ['1xx', '2xx', '3xx', '4xx', '5xx'].map((k) => {
     const n = num(s[k]), p = total ? Math.round(n / total * 100) : 0;
     return `<div class="list-row"><div class="grow"><div>${k} <span class="muted">${p}%</span></div><progress class="status-progress" value="${n}" max="${total || 1}"></progress></div><strong>${fmtNum(n)}</strong></div>`;
   }).join('');
@@ -621,7 +621,7 @@ async function analytics() {
       if (state.page !== 'analytics' || !$('#analytics-data')) return;
       const stats = obj(statsRaw), reqs = arr(reqsRaw);
       $('#analytics-data').innerHTML = `
-        <div class="cards">${metric('requests', 'Requests', fmtNum(stats.requests))}${metric('clients', 'Clients', fmtNum(stats.unique_ips))}${metric('traffic', 'Traffic', fmtBytes(stats.bytes))}${metric('status', 'Avg response', `${num(stats.average_time_ms).toFixed(1)} ms`)}</div>
+        <div class="cards">${metric('requests', 'Requests', fmtNum(stats.requests))}${metric('clients', 'Clients', fmtNum(stats.unique_ips))}${metric('traffic', 'Traffic', fmtBytes(stats.bytes))}${metric('status', 'Avg response', `${num(stats.average_time_ms).toFixed(1)} ms`, `${esc(tr('Avg upstream'))}: ${num(stats.average_upstream_time_ms).toFixed(1)} ms`)}</div>
         <div class="grid-2 analytics-grid">
           <div class="card">${sectionHeading('proxy-hosts', 'Top domains')}${domainCountList(arr(stats.top_hosts))}</div>
           <div class="card">${sectionHeading('ip', 'Top client IPs')}${countList(arr(stats.top_ips))}</div>
@@ -676,10 +676,23 @@ async function analytics() {
   }, 1000);
 }
 
+function formatRequestDuration(r) {
+  const total = num(r.request_time_ms);
+  if (num(r.status) === 101) {
+    const seconds = Math.max(0, Math.round(total / 1000));
+    const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60), sec = seconds % 60;
+    const duration = h ? `${h}h ${m}m` : m ? `${m}m ${sec}s` : `${sec}s`;
+    return `<strong>WS · ${duration}</strong><div class="tiny muted">${tr('Connection duration')}</div>`;
+  }
+  const upstream = r.upstream_time_ms == null ? null : num(r.upstream_time_ms);
+  const detail = upstream == null ? '' : `<div class="tiny muted">${tr('Upstream')} ${upstream.toFixed(1)} ms</div>`;
+  return `<strong>${total.toFixed(1)} ms</strong>${detail}`;
+}
+
 function requestTable(rs) {
   rs = arr(rs);
   if (!rs.length) return '<div class="empty">No requests recorded yet.</div>';
-  return `<div class="table-wrap"><table><thead><tr><th>Time</th><th>Host</th><th>Client IP</th><th>Method</th><th>Path</th><th>Status</th><th>Time</th></tr></thead><tbody>${rs.map((r) => `<tr><td>${new Date(r.at).toLocaleTimeString()}</td><td><span class="analytics-host-cell">${esc(r.host)}${r.zentloop ? `<span class="analytics-zentloop-marker" title="Routed through ZentLoop">${icon('zentloop')}</span>` : ''}</span></td><td class="code">${esc(r.ip)}</td><td>${esc(r.method)}</td><td class="code">${esc(r.path)}${r.query ? '?' + esc(r.query) : ''}</td><td><span class="pill ${r.status < 400 ? 'good' : r.status >= 500 ? 'warn' : ''}">${num(r.status)}</span></td><td>${num(r.request_time_ms).toFixed(1)} ms</td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>Time</th><th>Host</th><th>Client IP</th><th>Method</th><th>Path</th><th>Status</th><th>Duration</th></tr></thead><tbody>${rs.map((r) => `<tr><td>${new Date(r.at).toLocaleTimeString()}</td><td><span class="analytics-host-cell">${esc(r.host)}${r.zentloop ? `<span class="analytics-zentloop-marker" title="Routed through ZentLoop">${icon('zentloop')}</span>` : ''}</span></td><td class="code">${esc(r.ip)}</td><td>${esc(r.method)}</td><td class="code">${esc(r.path)}${r.query ? '?' + esc(r.query) : ''}</td><td><span class="pill ${r.status < 400 ? 'good' : r.status >= 500 ? 'warn' : ''}">${num(r.status)}</span></td><td>${formatRequestDuration(r)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 async function providers() {
@@ -692,13 +705,15 @@ async function providers() {
   const ps = arr(psRaw), hs = arr(hsRaw), redirects = arr(redirectsRaw), dead = arr(deadRaw); state.hosts = hs;
   $('#top-actions').innerHTML = `<button id="add-provider" class="btn primary btn-icon">${icon('add')}<span>Add provider</span></button>`;
   const usageCount = (id) => [...hs, ...redirects, ...dead].filter(h => h.trusted_proxy_provider_id === id).length;
-  $('#content').innerHTML = `<div class="card">${sectionHeading('trusted-proxies', 'Trusted proxy providers', '<span class="muted">Define trusted proxy or CDN networks for real client IP detection. A provider only takes effect when selected on a Proxy Host, Redirect Host or 404 Host.</span>')}<div class="table-wrap"><table><thead><tr><th>Provider</th><th>Client IP header</th><th>Ranges</th><th>Used by hosts</th><th>Status</th><th></th></tr></thead><tbody>${ps.map((p) => {
+  $('#content').innerHTML = `<div class="card">${sectionHeading('trusted-proxies', 'Trusted proxy providers', '<span class="muted">Define trusted proxy or CDN networks for real client IP detection. A provider only takes effect when selected on a Proxy Host, Redirect Host or 404 Host.</span>')}<div class="table-wrap"><table><thead><tr><th>Provider</th><th>Client IP header</th><th>Ranges</th><th>Used by hosts</th><th>Last check</th><th>Next check</th><th>Status</th><th></th></tr></thead><tbody>${ps.map((p) => {
     const builtin = p.slug === 'cloudflare' || p.kind !== 'manual';
     const status = p.last_error ? `<span class="danger-text">${esc(p.last_error)}</span>` : (builtin ? '<span class="good-text">Automatically maintained</span>' : '<span class="good-text">Manual</span>');
+    const lastCheck = builtin && p.last_checked ? new Date(p.last_checked).toLocaleString() : (builtin ? '—' : tr('Manually managed'));
+    const nextCheck = builtin && p.next_check ? new Date(p.next_check).toLocaleString() : (builtin ? '—' : tr('Manually managed'));
     const actions = builtin
       ? `<button class="btn small btn-icon" data-refresh-provider="${p.id}">${icon('refresh')}<span>Refresh</span></button>`
       : `<button class="btn small" data-edit-provider="${p.id}">Edit</button><button class="btn small danger" data-delete-provider="${p.id}">Delete</button>`;
-    return `<tr><td><strong>${esc(p.name)}</strong><div class="tiny muted">${builtin ? 'Built-in provider' : 'Custom provider'}</div></td><td class="code">${esc(p.header)}</td><td>${fmtNum(arr(p.cidrs).length)}</td><td>${fmtNum(usageCount(p.id))}</td><td>${status}</td><td><div class="inline-actions">${actions}</div></td></tr>`;
+    return `<tr><td><strong>${esc(p.name)}</strong><div class="tiny muted">${builtin ? 'Built-in provider' : 'Custom provider'}</div></td><td class="code">${esc(p.header)}</td><td>${fmtNum(arr(p.cidrs).length)}</td><td>${fmtNum(usageCount(p.id))}</td><td>${esc(lastCheck)}</td><td>${esc(nextCheck)}</td><td>${status}</td><td><div class="inline-actions">${actions}</div></td></tr>`;
   }).join('')}</tbody></table></div></div>`;
   $('#add-provider').onclick = () => openProviderEditor();
   $$('[data-refresh-provider]').forEach((b) => {
