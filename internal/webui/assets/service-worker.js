@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'zentproxy-static-v0.7.20';
+const CACHE_VERSION = 'zentproxy-static-v0.7.21';
 const APP_SHELL = [
   '/',
   '/styles.css',

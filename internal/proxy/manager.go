@@ -1546,16 +1546,14 @@ func renderHostServer(h model.Host, accessLists map[int64]model.AccessList, prov
 			if a.AuthEnabled && strings.TrimSpace(a.AuthFile) != "" {
 				fmt.Fprintf(&b, "        auth_basic %q;\n        auth_basic_user_file %s;\n", "Authorization required", nginxFilePath(a.AuthFile, "/data/access-lists/invalid"))
 			}
-			if !a.PassAuth {
-				b.WriteString("        proxy_set_header Authorization \"\";\n")
-			}
 		}
 	}
 	if h.BlockCommonExploits {
 		b.WriteString("        location ~* ^/(?:\\.git|\\.svn|\\.hg)(?:/|$) { return 404; }\n        location ~* \\.(?:bak|old|orig|swp|sql)$ { return 404; }\n")
 	}
+	authorizationHeader := proxyAuthorizationHeader(h, accessLists)
 	for _, loc := range h.CustomLocations {
-		b.WriteString(renderLocation(h, loc, "        "))
+		b.WriteString(renderLocation(h, loc, "        ", authorizationHeader))
 	}
 	advancedConfig := h.AdvancedConfig
 	if h.TrustedProxyProviderID != nil {
@@ -1568,14 +1566,23 @@ func renderHostServer(h model.Host, accessLists map[int64]model.AccessList, prov
 		}
 	}
 	if !advancedHasDefaultLocation(h.AdvancedConfig) {
-		b.WriteString(renderDefaultLocation(h, "        "))
+		b.WriteString(renderDefaultLocation(h, "        ", authorizationHeader))
 	}
 	b.WriteString("    }\n\n")
 	return b.String()
 }
 
-func renderDefaultLocation(h model.Host, indent string) string {
-	return renderLocation(h, model.CustomLocation{Path: "/", Scheme: h.Scheme, ForwardHost: h.ForwardHost, ForwardPort: h.ForwardPort}, indent)
+func proxyAuthorizationHeader(h model.Host, accessLists map[int64]model.AccessList) string {
+	if h.AccessListID != nil {
+		if accessList, ok := accessLists[*h.AccessListID]; ok && !accessList.PassAuth {
+			return "\"\""
+		}
+	}
+	return "$http_authorization"
+}
+
+func renderDefaultLocation(h model.Host, indent, authorizationHeader string) string {
+	return renderLocation(h, model.CustomLocation{Path: "/", Scheme: h.Scheme, ForwardHost: h.ForwardHost, ForwardPort: h.ForwardPort}, indent, authorizationHeader)
 }
 
 func proxyUpstreamHostHeader(host string, port int) string {
@@ -1590,7 +1597,7 @@ func proxyUpstreamHostHeader(host string, port int) string {
 	return host + ":" + strconv.Itoa(port)
 }
 
-func renderLocation(h model.Host, loc model.CustomLocation, indent string) string {
+func renderLocation(h model.Host, loc model.CustomLocation, indent, authorizationHeader string) string {
 	path := strings.TrimSpace(loc.Path)
 	if path == "" {
 		path = "/"
@@ -1621,6 +1628,7 @@ func renderLocation(h model.Host, loc model.CustomLocation, indent string) strin
 		fmt.Fprintf(&b, "%s    proxy_set_header X-Forwarded-Proto $scheme;\n", indent)
 	}
 	fmt.Fprintf(&b, "%s    proxy_set_header X-Forwarded-Host $host;\n", indent)
+	fmt.Fprintf(&b, "%s    proxy_set_header Authorization %s;\n", indent, authorizationHeader)
 	if h.WebSockets {
 		fmt.Fprintf(&b, "%s    proxy_set_header Upgrade $http_upgrade;\n%s    proxy_set_header Connection $connection_upgrade;\n", indent, indent)
 		fmt.Fprintf(&b, "%s    proxy_read_timeout 3600s;\n%s    proxy_send_timeout 3600s;\n", indent, indent)
